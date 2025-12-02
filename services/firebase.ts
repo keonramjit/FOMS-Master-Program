@@ -1,4 +1,3 @@
-
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -32,7 +31,7 @@ import {
 import { Flight, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, SystemSettings, DispatchRecord, TrainingRecord, TrainingEvent, Organization, License, UserProfile, LocationDefinition } from "../types";
 
 const firebaseConfig = {
-  apiKey: process.env.API_KEY || "AIzaSyC3fhxJINKe8oiizZqxbuT8wb8eTNxofDY",
+  apiKey: "AIzaSyC3fhxJINKe8oiizZqxbuT8wb8eTNxofDY",
   authDomain: "tga-flight-operations--kkr.firebaseapp.com",
   projectId: "tga-flight-operations--kkr",
   storageBucket: "tga-flight-operations--kkr.firebasestorage.app",
@@ -46,7 +45,7 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 
-// Initialize Firestore with Offline Persistence (Modern v10+ syntax)
+// Initialize Firestore with Offline Persistence
 let db: any;
 try {
   db = initializeFirestore(app, {
@@ -55,15 +54,12 @@ try {
     })
   });
 } catch (e: any) {
-  // Handle "unimplemented" or other initialization errors gracefully
   console.warn("Firestore offline persistence could not be enabled:", e.message);
-  // Fallback to default instance without explicit persistence config if standard init fails
   db = getFirestore(app);
 }
 
 // --- Helpers ---
 
-// Sanitize data to remove undefined values which Firestore does not support
 const sanitizeData = <T extends Record<string, any>>(data: T): T => {
   const result = { ...data };
   Object.keys(result).forEach(key => {
@@ -158,7 +154,6 @@ export const subscribeToOrganization = (orgId: string, callback: (org: Organizat
       callback({ id: docSnap.id, ...(docSnap.data() as any) } as Organization);
     } else {
       callback(null);
-      // Attempt to seed if it doesn't exist (Dev convenience)
       seedOrganization();
     }
   }, (error) => {
@@ -169,8 +164,6 @@ export const subscribeToOrganization = (orgId: string, callback: (org: Organizat
 export const updateOrganizationLicense = async (orgId: string, license: Partial<License>) => {
   try {
     const docRef = doc(db, "organizations", orgId);
-    
-    // Construct dot notation update object to avoid overwriting nested maps
     const updates: any = {};
     if (license.status) updates['license.status'] = license.status;
     if (license.plan) updates['license.plan'] = license.plan;
@@ -183,7 +176,6 @@ export const updateOrganizationLicense = async (orgId: string, license: Partial<
   }
 };
 
-// Temporary Seed Function
 export const seedOrganization = async () => {
   const orgId = "trans_guyana";
   const defaultModules: SystemSettings = {
@@ -217,7 +209,6 @@ export const seedOrganization = async () => {
     const snap = await getDoc(docRef);
     if (!snap.exists()) {
       await setDoc(docRef, orgData);
-      console.log("Seeded Organization: Trans Guyana Airways");
     }
   } catch (e) {
     console.error("Error seeding organization:", e);
@@ -228,9 +219,7 @@ export const seedOrganization = async () => {
 
 export const subscribeToFlights = (date: string, callback: (flights: Flight[]) => void) => {
   if (!auth.currentUser) return () => {};
-
   const q = query(collection(db, "flights"), where("date", "==", date));
-  
   return onSnapshot(q, (snapshot) => {
     const flights = snapshot.docs.map(doc => ({
       id: doc.id,
@@ -244,14 +233,12 @@ export const subscribeToFlights = (date: string, callback: (flights: Flight[]) =
 
 export const fetchFlightHistory = async (startDate: string, endDate: string): Promise<Flight[]> => {
   if (!auth.currentUser) return [];
-  
   try {
     const q = query(
       collection(db, "flights"), 
       where("date", ">=", startDate),
       where("date", "<=", endDate)
     );
-    
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({
       id: doc.id,
@@ -265,7 +252,6 @@ export const fetchFlightHistory = async (startDate: string, endDate: string): Pr
 
 export const fetchAircraftHistory = async (registration: string): Promise<Flight[]> => {
   if (!auth.currentUser) return [];
-
   try {
     const q = query(
       collection(db, "flights"),
@@ -273,7 +259,6 @@ export const fetchAircraftHistory = async (registration: string): Promise<Flight
       orderBy("date", "desc"),
       limit(50)
     );
-
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({
       id: doc.id,
@@ -321,19 +306,16 @@ export const syncFlightSchedule = async (
   const batch = writeBatch(db);
   const flightsRef = collection(db, "flights");
 
-  // 1. Adds
   adds.forEach(flight => {
     const newDocRef = doc(flightsRef);
     batch.set(newDocRef, sanitizeData(flight));
   });
 
-  // 2. Updates
   updates.forEach(({ id, data }) => {
     const docRef = doc(db, "flights", id);
     batch.update(docRef, sanitizeData(data));
   });
 
-  // 3. Deletes
   deletes.forEach(id => {
     const docRef = doc(db, "flights", id);
     batch.delete(docRef);

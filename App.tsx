@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { StatsCards } from './components/StatsCards';
@@ -292,7 +291,7 @@ const App: React.FC = () => {
                 ) : currentView === 'fleet' && features.enableFleetManagement ? (
                     <FleetManager fleet={fleet} flights={flights} onAdd={addAircraft} onUpdate={updateAircraft} features={features} />
                 ) : currentView === 'planning' && features.enableFlightPlanning ? (
-                    <FlightPlanning currentDate={currentDate} onDateChange={setCurrentDate} flights={flights} fleet={fleet} crew={crewRoster} routes={routes} customers={customers} onAddFlight={addFlight} onUpdateFlight={updateFlight} onDeleteFlight={deleteFlight} />
+                    <FlightPlanning currentDate={currentDate} onDateChange={setCurrentDate} flights={flights} fleet={fleet} crew={crewRoster} routes={routes} customers={customers} onAddFlight={addFlight} onUpdateFlight={updateFlight} onDeleteFlight={deleteFlight} locations={locations} />
                 ) : currentView === 'dispatch' ? (
                     <DispatchManager flights={flights} fleet={fleet} crew={crewRoster} currentDate={currentDate} isEnabled={features.enableDispatch} onDateChange={setCurrentDate} />
                 ) : currentView === 'voyage' ? (
@@ -346,7 +345,7 @@ const App: React.FC = () => {
         </Suspense>
       </main>
 
-      <FlightModal isOpen={isFlightModalOpen} onClose={() => setIsFlightModalOpen(false)} onSave={handleSaveFlight} editingFlight={editingFlight} fleet={fleet} crew={crewRoster} customers={customers} flights={flights} />
+      <FlightModal isOpen={isFlightModalOpen} onClose={() => setIsFlightModalOpen(false)} onSave={handleSaveFlight} editingFlight={editingFlight} fleet={fleet} crew={crewRoster} customers={customers} flights={flights} features={features} locations={locations} routes={routes} />
     </div>
   );
 };

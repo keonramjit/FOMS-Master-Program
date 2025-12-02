@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition } from '../types';
+import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition, LocationDefinition } from '../types';
 import { CalendarWidget } from './CalendarWidget';
 import { Plus, Trash2, MapPin, User, Hash, Clock, AlertCircle, RefreshCw, CheckCircle2, Plane, Save, ChevronDown, X, Activity, FileDown, ArrowRightLeft } from 'lucide-react';
 import { syncFlightSchedule } from '../services/firebase';
@@ -12,6 +11,7 @@ interface FlightPlanningProps {
   fleet: (Aircraft & { _docId?: string })[];
   crew: (CrewMember & { _docId?: string })[];
   routes: RouteDefinition[];
+  locations?: LocationDefinition[];
   customers: CustomerDefinition[];
   onAddFlight: (flight: Omit<Flight, 'id'>) => Promise<void>;
   onUpdateFlight: (id: string, updates: Partial<Flight>) => Promise<void>;
@@ -25,6 +25,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
   fleet,
   crew,
   routes,
+  locations = [],
   customers,
   onAddFlight,
   onUpdateFlight,
