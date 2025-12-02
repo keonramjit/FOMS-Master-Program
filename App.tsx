@@ -7,7 +7,7 @@ import { CalendarWidget } from './components/CalendarWidget';
 import { FlightModal } from './components/FlightModal';
 import { DigitalClock } from './components/DigitalClock';
 import { LoginScreen } from './components/LoginScreen';
-import { Flight, OperationsStats, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, FlightStatus, SystemSettings, UserProfile } from './types';
+import { Flight, OperationsStats, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, FlightStatus, SystemSettings, UserProfile, LocationDefinition } from './types';
 import { Loader2, AlertCircle, Menu, PlaneTakeoff, Activity } from 'lucide-react';
 import { INITIAL_FLIGHTS, CREW_ROSTER, FLEET_INVENTORY } from './constants';
 import { 
@@ -31,7 +31,10 @@ import {
   addCustomer, 
   updateCustomer, 
   deleteCustomer, 
-  // NEW SAAS IMPORTS
+  fetchLocations,
+  addLocation,
+  updateLocation,
+  deleteLocation,
   subscribeToOrganization,
   updateOrganizationLicense,
   getUserProfile,
@@ -82,6 +85,7 @@ const App: React.FC = () => {
   const [crewRoster, setCrewRoster] = useState<(CrewMember & { _docId: string })[]>([]);
   const [fleet, setFleet] = useState<(Aircraft & { _docId: string })[]>([]);
   const [routes, setRoutes] = useState<RouteDefinition[]>([]);
+  const [locations, setLocations] = useState<LocationDefinition[]>([]);
   const [customers, setCustomers] = useState<CustomerDefinition[]>([]);
   
   // System Settings / Features
@@ -141,6 +145,7 @@ const App: React.FC = () => {
         setCrewRoster(CREW_ROSTER.map((c, i) => ({ ...c, _docId: `demo-crew-${i}` })));
         setFleet(FLEET_INVENTORY.map((f, i) => ({ ...f, _docId: `demo-fleet-${i}` })));
         setRoutes([]);
+        setLocations([]);
         setCustomers([]);
         return;
     }
@@ -168,6 +173,8 @@ const App: React.FC = () => {
     const loadStaticData = async () => {
         const r = await fetchRoutes();
         setRoutes(r);
+        const l = await fetchLocations();
+        setLocations(l);
         const c = await fetchCustomers();
         setCustomers(c);
     };
@@ -277,7 +284,7 @@ const App: React.FC = () => {
                         userProfile={userProfile}
                         onUpdateLicense={async (s) => {
                             const orgId = userProfile?.orgId || 'trans_guyana';
-                            await updateOrganizationLicense(orgId, { ...features, ...s });
+                            await updateOrganizationLicense(orgId, { modules: { ...features, ...s } });
                         }}
                     />
                 ) : currentView === 'crew' && features.enableCrewManagement ? (
@@ -293,7 +300,26 @@ const App: React.FC = () => {
                 ) : currentView === 'training' ? (
                     <TrainingManager crew={crewRoster} features={features} onAddRecord={addTrainingRecord} onUpdateRecord={updateTrainingRecord} onDeleteRecord={deleteTrainingRecord} onAddEvent={addTrainingEvent} onUpdateEvent={updateTrainingEvent} onDeleteEvent={deleteTrainingEvent} />
                 ) : currentView === 'routes' ? (
-                    <RouteManager routes={routes} onAddRoute={addRoute} onUpdateRoute={updateRoute} onDeleteRoute={deleteRoute} features={features} />
+                    <RouteManager 
+                      routes={routes} 
+                      locations={locations}
+                      onAddRoute={addRoute} 
+                      onUpdateRoute={updateRoute} 
+                      onDeleteRoute={deleteRoute} 
+                      onAddLocation={async (l) => {
+                          if(isDemoMode) setLocations(prev => [...prev, { ...l, id: `demo-${Date.now()}` }]);
+                          else await addLocation(l);
+                      }}
+                      onUpdateLocation={async (id, l) => {
+                          if(isDemoMode) setLocations(prev => prev.map(x => x.id === id ? { ...x, ...l } : x));
+                          else await updateLocation(id, l);
+                      }}
+                      onDeleteLocation={async (id) => {
+                          if(isDemoMode) setLocations(prev => prev.filter(x => x.id !== id));
+                          else await deleteLocation(id);
+                      }}
+                      features={features} 
+                    />
                 ) : currentView === 'customers' ? (
                     <CustomerManager customers={customers} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onDeleteCustomer={deleteCustomer} features={features} />
                 ) : (
@@ -320,7 +346,7 @@ const App: React.FC = () => {
         </Suspense>
       </main>
 
-      <FlightModal isOpen={isFlightModalOpen} onClose={() => setIsFlightModalOpen(false)} onSave={handleSaveFlight} editingFlight={editingFlight} fleet={fleet} crew={crewRoster} customers={customers} />
+      <FlightModal isOpen={isFlightModalOpen} onClose={() => setIsFlightModalOpen(false)} onSave={handleSaveFlight} editingFlight={editingFlight} fleet={fleet} crew={crewRoster} customers={customers} flights={flights} />
     </div>
   );
 };

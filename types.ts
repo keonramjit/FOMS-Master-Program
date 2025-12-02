@@ -62,6 +62,12 @@ export interface RouteDefinition {
   commercialTime1900D?: number;
 }
 
+export interface LocationDefinition {
+  id: string;
+  name: string; // e.g. Kaieteur Falls
+  code: string; // e.g. KAI
+}
+
 export interface CustomerDefinition {
   id: string;
   name: string;

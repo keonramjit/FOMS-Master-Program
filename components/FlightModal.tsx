@@ -1,8 +1,7 @@
-
-
 import React, { useState, useEffect } from 'react';
-import { Flight, Aircraft, CrewMember, CustomerDefinition } from '../types';
-import { X, Save, Plane, Calendar, Clock, User, MapPin, ChevronDown, ArrowRightLeft, Timer, Hash } from 'lucide-react';
+import { Flight, Aircraft, CrewMember, CustomerDefinition, TrainingRecord } from '../types';
+import { X, Save, Plane, Calendar, Clock, User, MapPin, ChevronDown, ArrowRightLeft, Timer, Hash, AlertTriangle } from 'lucide-react';
+import { fetchCrewTrainingRecords } from '../services/firebase';
 
 interface FlightModalProps {
   isOpen: boolean;
@@ -12,6 +11,7 @@ interface FlightModalProps {
   fleet: (Aircraft & { _docId: string })[];
   crew: (CrewMember & { _docId: string })[];
   customers?: CustomerDefinition[];
+  flights: Flight[];
 }
 
 export const FlightModal: React.FC<FlightModalProps> = ({ 
@@ -21,7 +21,8 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   editingFlight, 
   fleet, 
   crew,
-  customers = []
+  customers = [],
+  flights
 }) => {
   const [formData, setFormData] = useState<Partial<Flight>>({
     flightNumber: '',
@@ -43,6 +44,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   // Return Flight State
   const [createReturn, setCreateReturn] = useState(false);
   const [turnaroundMin, setTurnaroundMin] = useState(30);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const [loading, setLoading] = useState(false);
 
@@ -50,6 +52,8 @@ export const FlightModal: React.FC<FlightModalProps> = ({
     if (editingFlight) {
       setFormData(editingFlight);
       setCreateReturn(false); // Disable return creation when editing existing
+      // Validate pilot on load if editing
+      if (editingFlight.pic) validatePilot(editingFlight.pic, editingFlight.date, editingFlight.flightTime || 0);
     } else {
         // Use local time for default date
         const d = new Date();
@@ -75,6 +79,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         notes: ''
       });
       setCreateReturn(false);
+      setWarnings([]);
     }
   }, [editingFlight, isOpen]);
 
@@ -117,6 +122,59 @@ export const FlightModal: React.FC<FlightModalProps> = ({
     const newM = Math.floor(totalMinutes % 60);
     
     return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
+  };
+
+  // --- Smart Dispatch Validation ---
+  const validatePilot = async (crewCode: string, date: string, flightDuration: number) => {
+    const newWarnings: string[] = [];
+    if (!crewCode || !date) {
+        setWarnings([]);
+        return;
+    }
+
+    // 1. FDP Check (Flight Duty Period)
+    // Filter flights for this pilot on this date
+    // Exclude current flight if editing to avoid double counting
+    const pilotDailyFlights = flights.filter(f => 
+        f.date === date && 
+        (f.pic === crewCode || f.sic === crewCode) && 
+        (editingFlight ? f.id !== editingFlight.id : true)
+    );
+    
+    const previousHours = pilotDailyFlights.reduce((acc, f) => acc + (f.flightTime || 0), 0);
+    const potentialTotal = previousHours + flightDuration;
+
+    if (potentialTotal > 8) {
+        newWarnings.push(`FDP Alert: Pilot has flown ${previousHours.toFixed(1)}h today. Adding this flight (${flightDuration}h) exceeds 8h limit (Total: ${potentialTotal.toFixed(1)}h).`);
+    }
+
+    // 2. Training/Expiry Check
+    try {
+        const records = await fetchCrewTrainingRecords(crewCode);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Reset time for accurate date comparison
+        
+        const relevantTypes = ['Medical', 'License'];
+        
+        records.forEach(r => {
+            if (relevantTypes.includes(r.type)) {
+                const expiry = new Date(r.expiryDate);
+                if (expiry < today) {
+                    newWarnings.push(`Expired Document: ${r.type} expired on ${r.expiryDate}`);
+                }
+            }
+        });
+    } catch (e) {
+        console.error("Validation error", e);
+    }
+
+    setWarnings(newWarnings);
+  };
+
+  const handlePicChange = (crewCode: string) => {
+      setFormData(prev => ({ ...prev, pic: crewCode }));
+      // Trigger validation
+      validatePilot(crewCode, formData.date || '', formData.flightTime || 0);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -210,7 +268,11 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                     type="date"
                     required
                     value={formData.date}
-                    onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                    onChange={e => {
+                        const newDate = e.target.value;
+                        setFormData(prev => ({ ...prev, date: newDate }));
+                        if(formData.pic) validatePilot(formData.pic, newDate, formData.flightTime || 0);
+                    }}
                     className={inputClass}
                   />
                 </div>
@@ -312,7 +374,11 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                     step="0.1"
                     min="0"
                     value={formData.flightTime || ''}
-                    onChange={e => setFormData(prev => ({ ...prev, flightTime: parseFloat(e.target.value) }))}
+                    onChange={e => {
+                        const time = parseFloat(e.target.value);
+                        setFormData(prev => ({ ...prev, flightTime: time }));
+                        if(formData.pic) validatePilot(formData.pic, formData.date || '', time);
+                    }}
                     className={`${inputClass} !pl-4`}
                     placeholder="e.g. 1.5"
                 />
@@ -358,7 +424,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                              <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className={labelClass}>Turnaround (Mins)</label>
-                                    <div className={inputWrapperClass}>
+                                    <div className="relative">
                                         <Timer className={iconClass} size={18} />
                                         <input 
                                             type="number"
@@ -393,13 +459,29 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                 <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
                     <User size={16} className="text-blue-500"/> Crew Assignment
                 </h3>
+                
+                {/* Warnings Alert Box */}
+                {warnings.length > 0 && (
+                    <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 animate-in slide-in-from-top-2">
+                        <div className="flex gap-3">
+                            <AlertTriangle className="text-red-600 shrink-0" size={20} />
+                            <div>
+                                <h4 className="text-xs font-bold text-red-800 uppercase mb-1">Safety Checks Failed</h4>
+                                <ul className="list-disc list-inside text-xs text-red-700 space-y-1">
+                                    {warnings.map((w, idx) => <li key={idx}>{w}</li>)}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div>
                     <label className={labelClass}>Pilot in Command (PIC)</label>
                     <div className={inputWrapperClass}>
                         <select 
                             value={formData.pic}
-                            onChange={e => setFormData(prev => ({ ...prev, pic: e.target.value }))}
+                            onChange={e => handlePicChange(e.target.value)}
                             className={selectClass}
                         >
                             <option value="">Select Pilot...</option>

@@ -1,31 +1,38 @@
+
 import { initializeApp } from "firebase/app";
-import * as firebaseAuth from "firebase/auth";
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  User as FirebaseUser
+} from "firebase/auth";
 import { 
   getFirestore, 
   collection, 
+  doc, 
   onSnapshot, 
   addDoc, 
   updateDoc, 
   deleteDoc, 
-  doc, 
   query, 
-  orderBy,
-  where,
-  setDoc,
-  getDoc,
-  getDocs,
-  limit,
+  where, 
+  orderBy, 
+  limit, 
+  getDocs, 
+  getDoc, 
+  setDoc, 
   writeBatch,
-  QuerySnapshot,
-  DocumentData,
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager
+  persistentMultipleTabManager,
+  QuerySnapshot,
+  DocumentData
 } from "firebase/firestore";
-import { Flight, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, SystemSettings, DispatchRecord, TrainingRecord, TrainingEvent, UserProfile, Organization } from "../types";
+import { Flight, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, SystemSettings, DispatchRecord, TrainingRecord, TrainingEvent, Organization, License, UserProfile, LocationDefinition } from "../types";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyC3fhxJINKe8oiizZqxbuT8wb8eTNxofDY",
+  apiKey: process.env.API_KEY || "AIzaSyC3fhxJINKe8oiizZqxbuT8wb8eTNxofDY",
   authDomain: "tga-flight-operations--kkr.firebaseapp.com",
   projectId: "tga-flight-operations--kkr",
   storageBucket: "tga-flight-operations--kkr.firebasestorage.app",
@@ -37,23 +44,26 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-export const auth = firebaseAuth.getAuth(app);
+export const auth = getAuth(app);
 
-// Initialize Firestore with Offline Persistence
-let db;
+// Initialize Firestore with Offline Persistence (Modern v10+ syntax)
+let db: any;
 try {
-    db = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-            tabManager: persistentMultipleTabManager()
-        })
-    });
-} catch (e) {
-    console.warn("Firestore offline persistence failed to initialize. Falling back to default.", e);
-    db = getFirestore(app);
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  });
+} catch (e: any) {
+  // Handle "unimplemented" or other initialization errors gracefully
+  console.warn("Firestore offline persistence could not be enabled:", e.message);
+  // Fallback to default instance without explicit persistence config if standard init fails
+  db = getFirestore(app);
 }
 
 // --- Helpers ---
 
+// Sanitize data to remove undefined values which Firestore does not support
 const sanitizeData = <T extends Record<string, any>>(data: T): T => {
   const result = { ...data };
   Object.keys(result).forEach(key => {
@@ -64,11 +74,11 @@ const sanitizeData = <T extends Record<string, any>>(data: T): T => {
   return result;
 };
 
-// --- Authentication & User Profiles ---
+// --- Authentication ---
 
 export const loginUser = async (email: string, pass: string) => {
   try {
-    await firebaseAuth.signInWithEmailAndPassword(auth, email, pass);
+    await signInWithEmailAndPassword(auth, email, pass);
   } catch (error: any) {
     console.error("Login error:", error);
     throw error;
@@ -77,43 +87,46 @@ export const loginUser = async (email: string, pass: string) => {
 
 export const logoutUser = async () => {
   try {
-    await firebaseAuth.signOut(auth);
+    await signOut(auth);
   } catch (error) {
     console.error("Logout error:", error);
   }
 };
 
 export const subscribeToAuth = (callback: (user: any | null) => void) => {
-  return firebaseAuth.onAuthStateChanged(auth, (user: any) => {
+  return onAuthStateChanged(auth, (user) => {
     callback(user);
   });
 };
 
+// --- User Profiles ---
+
 export const getUserProfile = async (email: string): Promise<UserProfile | null> => {
-    if (!email) return null;
-    try {
-        const docRef = doc(db, "users", email);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-            return snap.data() as UserProfile;
-        }
-        return null;
-    } catch (e) {
-        console.error("Error fetching user profile:", e);
-        return null;
+  if (!email) return null;
+  try {
+    const docRef = doc(db, "users", email);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data() as UserProfile;
     }
+    return null;
+  } catch (e) {
+    console.error("Error fetching user profile:", e);
+    return null;
+  }
 };
 
-export const createUserProfile = async (profile: UserProfile) => {
-    try {
-        await setDoc(doc(db, "users", profile.email), sanitizeData(profile));
-    } catch (e) {
-        console.error("Error creating user profile:", e);
-        throw e;
-    }
+export const createUserProfile = async (userProfile: UserProfile) => {
+  if (!userProfile.email) return;
+  try {
+    const docRef = doc(db, "users", userProfile.email);
+    await setDoc(docRef, sanitizeData(userProfile));
+  } catch (e) {
+    console.error("Error creating user profile:", e);
+    throw e;
+  }
 };
 
-// NEW: Fetch all users for an organization
 export const fetchOrganizationUsers = async (orgId: string): Promise<UserProfile[]> => {
   if (!auth.currentUser) return [];
   try {
@@ -126,7 +139,6 @@ export const fetchOrganizationUsers = async (orgId: string): Promise<UserProfile
   }
 };
 
-// NEW: Delete a user
 export const deleteUserProfile = async (email: string) => {
     try {
         await deleteDoc(doc(db, "users", email));
@@ -136,65 +148,90 @@ export const deleteUserProfile = async (email: string) => {
     }
 };
 
-// --- Organization / SaaS Logic ---
+// --- Organization & Licensing (SaaS) ---
 
 export const subscribeToOrganization = (orgId: string, callback: (org: Organization | null) => void) => {
-  if (!auth.currentUser || !orgId) return () => {};
-  
   const docRef = doc(db, "organizations", orgId);
   
   return onSnapshot(docRef, (docSnap) => {
     if (docSnap.exists()) {
       callback({ id: docSnap.id, ...(docSnap.data() as any) } as Organization);
     } else {
-      seedOrganization(orgId);
+      callback(null);
+      // Attempt to seed if it doesn't exist (Dev convenience)
+      seedOrganization();
     }
-  }, (error) => console.error("Org snapshot error:", error));
+  }, (error) => {
+    console.error("Organization snapshot error", error);
+  });
 };
 
-export const updateOrganizationLicense = async (orgId: string, modules: SystemSettings) => {
-    try {
-        const docRef = doc(db, "organizations", orgId);
-        await setDoc(docRef, { license: { modules } }, { merge: true });
-    } catch(e) {
-        console.error("Error updating license:", e);
-        throw e;
-    }
+export const updateOrganizationLicense = async (orgId: string, license: Partial<License>) => {
+  try {
+    const docRef = doc(db, "organizations", orgId);
+    
+    // Construct dot notation update object to avoid overwriting nested maps
+    const updates: any = {};
+    if (license.status) updates['license.status'] = license.status;
+    if (license.plan) updates['license.plan'] = license.plan;
+    if (license.modules) updates['license.modules'] = license.modules;
+
+    await updateDoc(docRef, updates);
+  } catch (e) {
+    console.error("Error updating license:", e);
+    throw e;
+  }
 };
 
-const seedOrganization = async (orgId: string) => {
-    const defaultOrg: Organization = {
-        id: orgId,
-        name: 'Trans Guyana Airways',
-        license: {
-            plan: 'pro',
-            status: 'active',
-            modules: {
-                enableFleetManagement: true,
-                enableCrewManagement: true,
-                enableFlightPlanning: true,
-                enableDispatch: true,
-                enableVoyageReports: true,
-                enableTrainingManagement: true,
-                enableReports: true,
-                enableFleetChecks: true,
-                enableCrewFDP: true,
-                enableCrewStrips: true,
-                enableRouteManagement: true,
-                enableCustomerDatabase: true,
-                systemVersion: 'V1.0.0'
-            }
-        }
-    };
-    await setDoc(doc(db, "organizations", orgId), defaultOrg);
+// Temporary Seed Function
+export const seedOrganization = async () => {
+  const orgId = "trans_guyana";
+  const defaultModules: SystemSettings = {
+    enableFleetManagement: true,
+    enableCrewManagement: true,
+    enableFlightPlanning: true,
+    enableDispatch: true,
+    enableVoyageReports: true,
+    enableTrainingManagement: true,
+    enableReports: true,
+    enableFleetChecks: true,
+    enableCrewFDP: true,
+    enableCrewStrips: true,
+    enableRouteManagement: true,
+    enableCustomerDatabase: true,
+    systemVersion: 'V1.0.0'
+  };
+
+  const orgData: Organization = {
+    id: orgId,
+    name: "Trans Guyana Airways",
+    license: {
+      plan: 'pro',
+      status: 'active',
+      modules: defaultModules
+    }
+  };
+
+  try {
+    const docRef = doc(db, "organizations", orgId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      await setDoc(docRef, orgData);
+      console.log("Seeded Organization: Trans Guyana Airways");
+    }
+  } catch (e) {
+    console.error("Error seeding organization:", e);
+  }
 };
 
 // --- Flights Collection ---
 
 export const subscribeToFlights = (date: string, callback: (flights: Flight[]) => void) => {
   if (!auth.currentUser) return () => {};
+
   const q = query(collection(db, "flights"), where("date", "==", date));
-  return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+  
+  return onSnapshot(q, (snapshot) => {
     const flights = snapshot.docs.map(doc => ({
       id: doc.id,
       ...(doc.data() as any)
@@ -207,12 +244,14 @@ export const subscribeToFlights = (date: string, callback: (flights: Flight[]) =
 
 export const fetchFlightHistory = async (startDate: string, endDate: string): Promise<Flight[]> => {
   if (!auth.currentUser) return [];
+  
   try {
     const q = query(
       collection(db, "flights"), 
       where("date", ">=", startDate),
       where("date", "<=", endDate)
     );
+    
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({
       id: doc.id,
@@ -226,6 +265,7 @@ export const fetchFlightHistory = async (startDate: string, endDate: string): Pr
 
 export const fetchAircraftHistory = async (registration: string): Promise<Flight[]> => {
   if (!auth.currentUser) return [];
+
   try {
     const q = query(
       collection(db, "flights"),
@@ -233,6 +273,7 @@ export const fetchAircraftHistory = async (registration: string): Promise<Flight
       orderBy("date", "desc"),
       limit(50)
     );
+
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({
       id: doc.id,
@@ -280,16 +321,19 @@ export const syncFlightSchedule = async (
   const batch = writeBatch(db);
   const flightsRef = collection(db, "flights");
 
+  // 1. Adds
   adds.forEach(flight => {
     const newDocRef = doc(flightsRef);
     batch.set(newDocRef, sanitizeData(flight));
   });
 
+  // 2. Updates
   updates.forEach(({ id, data }) => {
     const docRef = doc(db, "flights", id);
     batch.update(docRef, sanitizeData(data));
   });
 
+  // 3. Deletes
   deletes.forEach(id => {
     const docRef = doc(db, "flights", id);
     batch.delete(docRef);
@@ -314,7 +358,9 @@ export const subscribeToDispatch = (flightId: string, callback: (dispatch: Dispa
         } else {
             callback(null);
         }
-    }, (error) => console.error("Dispatch snapshot error:", error));
+    }, (error) => {
+        console.error("Dispatch snapshot error:", error);
+    });
 };
 
 export const saveDispatchRecord = async (flightId: string, dispatchData: Omit<DispatchRecord, 'id' | 'flightId'>) => {
@@ -332,13 +378,15 @@ export const saveDispatchRecord = async (flightId: string, dispatchData: Omit<Di
 export const subscribeToCrew = (callback: (crew: (CrewMember & { _docId: string })[]) => void) => {
   if (!auth.currentUser) return () => {};
   const q = query(collection(db, "crew"), orderBy("name"));
-  return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+  return onSnapshot(q, (snapshot) => {
     const crew = snapshot.docs.map(doc => ({
       _docId: doc.id, 
       ...(doc.data() as any)
     })) as (CrewMember & { _docId: string })[];
     callback(crew);
-  }, (error) => console.error("Crew snapshot error:", error));
+  }, (error) => {
+    console.error("Crew snapshot error:", error);
+  });
 };
 
 export const addCrewMember = async (crew: CrewMember) => {
@@ -374,13 +422,15 @@ export const deleteCrewMember = async (docId: string) => {
 export const subscribeToFleet = (callback: (fleet: (Aircraft & { _docId: string })[]) => void) => {
   if (!auth.currentUser) return () => {};
   const q = query(collection(db, "fleet"), orderBy("registration"));
-  return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+  return onSnapshot(q, (snapshot) => {
     const fleet = snapshot.docs.map(doc => ({
       _docId: doc.id, 
       ...(doc.data() as any)
     })) as (Aircraft & { _docId: string })[];
     callback(fleet);
-  }, (error) => console.error("Fleet snapshot error:", error));
+  }, (error) => {
+    console.error("Fleet snapshot error:", error);
+  });
 };
 
 export const addAircraft = async (aircraft: Aircraft) => {
@@ -415,8 +465,8 @@ export const deleteAircraft = async (docId: string) => {
 
 export const fetchRoutes = async (): Promise<RouteDefinition[]> => {
   if (!auth.currentUser) return [];
-  const q = query(collection(db, "routes"), orderBy("code"));
   try {
+    const q = query(collection(db, "routes"), orderBy("code"));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as RouteDefinition[];
   } catch (e) {
@@ -453,12 +503,54 @@ export const deleteRoute = async (id: string) => {
   }
 };
 
+// --- Locations Collection ---
+
+export const fetchLocations = async (): Promise<LocationDefinition[]> => {
+  if (!auth.currentUser) return [];
+  try {
+    const q = query(collection(db, "locations"), orderBy("code"));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as LocationDefinition[];
+  } catch (e) {
+    console.error("Error fetching locations:", e);
+    return [];
+  }
+};
+
+export const addLocation = async (location: Omit<LocationDefinition, 'id'>) => {
+  try {
+    await addDoc(collection(db, "locations"), sanitizeData(location));
+  } catch (e) {
+    console.error("Error adding location: ", e);
+    throw e;
+  }
+};
+
+export const updateLocation = async (id: string, updates: Partial<LocationDefinition>) => {
+  try {
+    const docRef = doc(db, "locations", id);
+    await updateDoc(docRef, sanitizeData(updates));
+  } catch (e) {
+    console.error("Error updating location: ", e);
+    throw e;
+  }
+};
+
+export const deleteLocation = async (id: string) => {
+  try {
+    await deleteDoc(doc(db, "locations", id));
+  } catch (e) {
+    console.error("Error deleting location: ", e);
+    throw e;
+  }
+};
+
 // --- Customers Collection ---
 
 export const fetchCustomers = async (): Promise<CustomerDefinition[]> => {
   if (!auth.currentUser) return [];
-  const q = query(collection(db, "customers"), orderBy("name"));
   try {
+    const q = query(collection(db, "customers"), orderBy("name"));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as CustomerDefinition[];
   } catch (e) {
@@ -500,7 +592,7 @@ export const deleteCustomer = async (id: string) => {
 export const subscribeToTrainingRecords = (callback: (records: TrainingRecord[]) => void) => {
   if (!auth.currentUser) return () => {};
   const q = query(collection(db, "training_records"));
-  return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+  return onSnapshot(q, (snapshot) => {
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as TrainingRecord[];
     callback(data);
   }, (e) => console.error("Training records error", e));
@@ -512,6 +604,18 @@ export const addTrainingRecord = async (record: Omit<TrainingRecord, 'id'>) => {
   } catch (e) {
     console.error("Error adding training record", e);
     throw e;
+  }
+};
+
+export const fetchCrewTrainingRecords = async (crewCode: string): Promise<TrainingRecord[]> => {
+  if (!auth.currentUser) return [];
+  try {
+    const q = query(collection(db, "training_records"), where("crewCode", "==", crewCode));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as TrainingRecord[];
+  } catch (e) {
+    console.error("Error fetching crew training records:", e);
+    return [];
   }
 };
 
@@ -537,7 +641,7 @@ export const deleteTrainingRecord = async (id: string) => {
 export const subscribeToTrainingEvents = (callback: (events: TrainingEvent[]) => void) => {
   if (!auth.currentUser) return () => {};
   const q = query(collection(db, "training_events"), orderBy("date"));
-  return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
+  return onSnapshot(q, (snapshot) => {
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as TrainingEvent[];
     callback(data);
   }, (e) => console.error("Training events error", e));
@@ -568,61 +672,5 @@ export const deleteTrainingEvent = async (id: string) => {
   } catch (e) {
     console.error("Error deleting training event", e);
     throw e;
-  }
-};
-
-// --- System Settings (Feature Flags) ---
-
-export const subscribeToSystemSettings = (callback: (settings: SystemSettings) => void) => {
-  if (!auth.currentUser) return () => {};
-  
-  const docRef = doc(db, "system_settings", "config");
-  
-  return onSnapshot(docRef, (docSnap) => {
-    if (docSnap.exists()) {
-      callback(docSnap.data() as SystemSettings);
-    } else {
-      initializeSystemSettings();
-    }
-  }, (error) => {
-      console.error("System settings error", error);
-  });
-};
-
-export const updateSystemSettings = async (settings: Partial<SystemSettings>) => {
-    try {
-        const docRef = doc(db, "system_settings", "config");
-        await updateDoc(docRef, sanitizeData(settings));
-    } catch (e) {
-        console.error("Error updating system settings", e);
-        throw e;
-    }
-};
-
-export const initializeSystemSettings = async () => {
-  const defaultSettings: SystemSettings = {
-    enableFleetManagement: true,
-    enableCrewManagement: true,
-    enableFlightPlanning: true,
-    enableDispatch: true,
-    enableVoyageReports: true,
-    enableTrainingManagement: true,
-    enableReports: true,
-    enableFleetChecks: true,
-    enableCrewFDP: true,
-    enableCrewStrips: true,
-    enableRouteManagement: true,
-    enableCustomerDatabase: true,
-    systemVersion: 'V11282025|1030'
-  };
-  
-  try {
-     const docRef = doc(db, "system_settings", "config");
-     const snap = await getDoc(docRef);
-     if (!snap.exists()) {
-        await setDoc(docRef, defaultSettings);
-     }
-  } catch (e) {
-    console.error("Error init settings:", e);
   }
 };
