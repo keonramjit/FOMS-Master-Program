@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition, LocationDefinition, SystemSettings } from '../types';
+import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition, LocationDefinition } from '../types';
 import { CalendarWidget } from './CalendarWidget';
 import { Plus, Trash2, MapPin, User, Hash, Clock, AlertCircle, RefreshCw, CheckCircle2, Plane, Save, ChevronDown, X, Activity, FileDown, ArrowRightLeft } from 'lucide-react';
 import { syncFlightSchedule } from '../services/firebase';
@@ -16,7 +16,6 @@ interface FlightPlanningProps {
   onAddFlight: (flight: Omit<Flight, 'id'>) => Promise<void>;
   onUpdateFlight: (id: string, updates: Partial<Flight>) => Promise<void>;
   onDeleteFlight: (id: string) => Promise<void>;
-  features?: SystemSettings;
 }
 
 export const FlightPlanning: React.FC<FlightPlanningProps> = ({
@@ -31,7 +30,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
   onAddFlight,
   onUpdateFlight,
   onDeleteFlight,
-  features
 }) => {
   // Planning State
   const [localFlights, setLocalFlights] = useState<Flight[]>([]);
@@ -50,13 +48,21 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
   // Derived state for sync status
   const isSynced = !hasUnsavedChanges && removedFlightIds.length === 0;
 
-  // Helpers
+  // Define sync button properties based on state
+  const syncProps = {
+    icon: isSyncing ? <RefreshCw size={18} className="animate-spin" /> : (isSynced ? <CheckCircle2 size={18} /> : <Save size={18} />),
+    text: isSyncing ? 'Syncing...' : (isSynced ? 'Synced' : 'Sync Changes'),
+    color: isSynced ? 'bg-emerald-500 border-emerald-600 hover:bg-emerald-600' : 'bg-blue-600 border-blue-700 hover:bg-blue-700',
+    tooltip: isSynced ? 'All changes saved to cloud' : 'Push local changes to cloud'
+  };
+
+  // Helper to format Decimal Time to H:MM
   const decimalToHm = (val?: number) => {
-      if (val === undefined || val === null || isNaN(val)) return '';
-      const hrs = Math.floor(val);
-      const mins = Math.round((val - hrs) * 60);
-      const minsStr = mins.toString().padStart(2, '0');
-      return `${hrs}:${minsStr}`;
+    if (val === undefined || val === null || isNaN(val)) return '';
+    const hrs = Math.floor(val);
+    const mins = Math.round((val - hrs) * 60);
+    const minsStr = mins.toString().padStart(2, '0');
+    return `${hrs}:${minsStr}`;
   };
 
   // Trigger Confirmation Modal
@@ -67,6 +73,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
   const handleExportPDF = async () => {
     try {
+      // Lazy load the PDF service
       const { generateDailySchedulePDF } = await import('../services/pdfService');
       generateDailySchedulePDF(currentDate, localFlights);
     } catch (e) {
@@ -81,20 +88,29 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     if (!window.confirm(`Are you sure you want to clear all ${localFlights.length} flights for ${currentDate}? This action requires syncing to take effect.`)) return;
 
     setHasUnsavedChanges(true);
+
+    // 1. Identify persisted flights (not starting with temp-)
     const persistedIds = localFlights
         .filter(f => !f.id.startsWith('temp-') && !f.id.startsWith('imported-'))
         .map(f => f.id);
+
+    // 2. Add to removal list
     setRemovedFlightIds(prev => [...prev, ...persistedIds]);
+
+    // 3. Clear local view
     setLocalFlights([]);
   };
 
-  // Sync Logic
+  // Sync Logic: Push local changes to the database
   const executeSync = async () => {
     setShowConfirmSync(false);
     setIsSyncing(true);
+    
     try {
         const adds: Omit<Flight, 'id'>[] = [];
         const updates: { id: string; data: Partial<Flight> }[] = [];
+        
+        // Process local flight state to categorize into Adds and Updates
         localFlights.forEach(f => {
            if (f.id.startsWith('temp-') || f.id.startsWith('imported-')) {
              const { id, ...rest } = f;
@@ -104,7 +120,11 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
              updates.push({ id, data: rest });
            }
         });
+
+        // Batch call to firebase
         await syncFlightSchedule(adds, updates, removedFlightIds);
+
+        // Reset local state tracking
         setRemovedFlightIds([]);
         setHasUnsavedChanges(false);
     } catch (error) {
@@ -138,6 +158,8 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
   const handleAddSegment = (sourceFlight: Flight) => {
     setHasUnsavedChanges(true);
+    
+    // Logic to determine new route start (Start at previous destination)
     let newRoute = '';
     if (sourceFlight.route) {
         if (sourceFlight.route.includes('-')) {
@@ -147,6 +169,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
             newRoute = `${sourceFlight.route}-`;
         }
     }
+
     let newFlightNum = 'TGY';
     const numMatch = sourceFlight.flightNumber.match(/(\d+)$/);
     if (numMatch) {
@@ -154,10 +177,12 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         const prefix = sourceFlight.flightNumber.substring(0, numMatch.index);
         newFlightNum = `${prefix}${currentNum + 1}`;
     }
+
     const parentId = sourceFlight.parentId || sourceFlight.id;
+
     const newFlight: Flight = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      parentId: parentId,
+      parentId: parentId, 
       flightNumber: newFlightNum,
       route: newRoute,
       aircraftRegistration: sourceFlight.aircraftRegistration,
@@ -172,18 +197,23 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
       notes: '',
       commercialTime: ''
     };
+    
     setLocalFlights(prev => [...prev, newFlight]);
   };
 
   const handleAddReturn = (sourceFlight: Flight) => {
     setHasUnsavedChanges(true);
+    
     let newRoute = '';
     if (sourceFlight.route) {
         if (sourceFlight.route.includes('-')) {
             const [a, b] = sourceFlight.route.split('-');
             newRoute = `${b}-${a}`;
+        } else {
+            newRoute = ''; 
         }
     }
+
     let newFlightNum = 'TGY';
     const numMatch = sourceFlight.flightNumber.match(/(\d+)$/);
     if (numMatch) {
@@ -191,19 +221,23 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         const prefix = sourceFlight.flightNumber.substring(0, numMatch.index);
         newFlightNum = `${prefix}${currentNum + 1}`;
     }
+
     let newEtd = '';
     if (sourceFlight.etd) {
         const [h, m] = sourceFlight.etd.split(':').map(Number);
         if (!isNaN(h) && !isNaN(m)) {
              const flightDurationMinutes = (sourceFlight.flightTime || 0) * 60;
-             const turnaroundMinutes = 30;
+             const turnaroundMinutes = 30; 
              const totalMinutes = (h * 60) + m + flightDurationMinutes + turnaroundMinutes;
+             
              const newH = Math.floor(totalMinutes / 60) % 24;
              const newM = Math.floor(totalMinutes % 60);
              newEtd = `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
         }
     }
+
     const parentId = sourceFlight.parentId || sourceFlight.id;
+
     const newFlight: Flight = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       parentId: parentId,
@@ -212,7 +246,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
       aircraftRegistration: sourceFlight.aircraftRegistration,
       aircraftType: sourceFlight.aircraftType,
       etd: newEtd,
-      customer: sourceFlight.customer,
+      customer: sourceFlight.customer, 
       customerId: sourceFlight.customerId,
       pic: sourceFlight.pic,
       sic: sourceFlight.sic,
@@ -221,12 +255,14 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
       notes: `Return of ${sourceFlight.flightNumber}`,
       commercialTime: ''
     };
+    
     setLocalFlights(prev => [...prev, newFlight]);
   };
 
   const handleDeleteRow = (id: string) => {
     setHasUnsavedChanges(true);
     setLocalFlights(prev => prev.filter(f => f.id !== id));
+    
     if (!id.startsWith('temp-') && !id.startsWith('imported-')) {
         setRemovedFlightIds(prev => [...prev, id]);
     }
@@ -256,35 +292,35 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
   const handleRouteChange = (id: string, val: string) => {
     setHasUnsavedChanges(true);
     const code = val.toUpperCase();
+    
+    // Attempt to look up route logic
     const routeDef = routes.find(r => r.code === code);
     
     setLocalFlights(prev => prev.map(f => {
         if (f.id === id) {
              const updates: any = { route: code };
              
-             // Auto-populate times if route exists and feature is enabled
-             if (routeDef && features?.enableRouteManagement) {
-                 const type = f.aircraftType || 'C208B';
-                 let ft = routeDef.flightTime || 0;
-                 let ct = routeDef.commercialTimeC208B || 0;
+             // If route is found in DB, auto-populate times based on Aircraft Type
+             if (routeDef) {
+                const type = f.aircraftType || 'C208B';
+                let flightTime = routeDef.flightTime || 0;
+                let commTime = routeDef.commercialTimeC208B || 0;
 
-                 if (type === '1900D') {
-                     ft = routeDef.flightTime1900D || ft;
-                     ct = routeDef.commercialTime1900D || ct;
-                 } else if (type === 'C208EX') {
-                     ft = routeDef.flightTimeC208EX || ft;
-                     ct = routeDef.commercialTimeC208EX || ct;
-                 } else {
-                     ft = routeDef.flightTimeC208B || ft;
-                 }
+                if (type === '1900D') {
+                  flightTime = routeDef.flightTime1900D || flightTime;
+                  commTime = routeDef.commercialTime1900D || commTime;
+                } else if (type === 'C208EX') {
+                  flightTime = routeDef.flightTimeC208EX || flightTime;
+                  commTime = routeDef.commercialTimeC208EX || commTime;
+                } else {
+                  flightTime = routeDef.flightTimeC208B || flightTime;
+                }
 
-                 // Only update if currently empty to avoid overwriting manual edits
-                 if (!f.flightTime || f.flightTime === 0) {
-                     updates.flightTime = ft;
-                 }
-                 if (!f.commercialTime) {
-                     updates.commercialTime = ct ? decimalToHm(ct) : '';
-                 }
+                updates.flightTime = flightTime;
+                
+                if(commTime) {
+                    updates.commercialTime = decimalToHm(commTime);
+                }
              }
              return { ...f, ...updates };
         }
@@ -292,12 +328,15 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     }));
   };
 
+  // Helper to Group Flights for Display (Tree Structure)
   const getGroupedFlights = (allFlights: Flight[], aircraftReg: string) => {
     const relevant = allFlights.filter(f => f.aircraftRegistration === aircraftReg);
     if (relevant.length === 0) return [];
+
     const idMap = new Map(relevant.map(f => [f.id, f]));
     const roots: Flight[] = [];
     const childrenMap = new Map<string, Flight[]>();
+
     relevant.forEach(f => {
         if (f.parentId && idMap.has(f.parentId)) {
             if (!childrenMap.has(f.parentId)) childrenMap.set(f.parentId, []);
@@ -306,12 +345,14 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
             roots.push(f);
         }
     });
+    
     const result: Flight[] = [];
     roots.forEach(root => {
         result.push(root);
         const kids = childrenMap.get(root.id) || [];
         result.push(...kids);
     });
+
     return result;
   };
 
@@ -342,14 +383,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     }
   };
 
-  const getSyncButtonProps = () => {
-    if (isSyncing) return { text: 'Syncing...', color: 'bg-slate-600 border-slate-700', icon: <RefreshCw size={18} className="animate-spin text-white" />, tooltip: 'Updating dashboard database...' };
-    if (isSynced) return { text: 'Synced', color: 'bg-emerald-600 border-emerald-700 ring-1 ring-emerald-200 cursor-default shadow-none', icon: <CheckCircle2 size={18} className="text-white" />, tooltip: 'All changes are saved to the dashboard' };
-    return { text: 'Sync To Dashboard', color: 'bg-red-600 border-red-700 hover:bg-red-700 hover:shadow-lg active:scale-95', icon: <Save size={18} className="text-white" />, tooltip: 'You have unsaved changes. Click to push to dashboard.' };
-  };
-
-  const syncProps = getSyncButtonProps();
-
   const getRouteParts = (route: string) => {
     if (route && route.includes('-')) {
         const [a, b] = route.split('-');
@@ -360,6 +393,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative">
+      {/* Top Bar */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex flex-col sm:flex-row items-center justify-between gap-4 sticky top-0 z-30 shadow-sm">
         <div className="flex items-center gap-6">
             <div>
@@ -377,26 +411,59 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         
         <div className="flex items-center gap-3">
             <CalendarWidget selectedDate={currentDate} onDateSelect={(date) => {
-                if(!isSynced && window.confirm("You have unsaved changes. Discard them?")) {
-                    setHasUnsavedChanges(false);
-                    setRemovedFlightIds([]);
-                    onDateChange(date);
-                } else if (isSynced) {
+                if(!isSynced) {
+                    if(window.confirm("You have unsaved changes. Discard them?")) {
+                        setHasUnsavedChanges(false);
+                        setRemovedFlightIds([]);
+                        onDateChange(date);
+                    }
+                } else {
                     onDateChange(date);
                 }
             }} />
+
             <div className="h-6 w-px bg-slate-200 mx-2 hidden sm:block"></div>
-            <button onClick={handleExportPDF} className="p-2.5 text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:text-blue-600 rounded-lg transition-all shadow-sm"><FileDown size={20} /></button>
-            <button onClick={handleClearSchedule} disabled={localFlights.length === 0} className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all disabled:opacity-30"><Trash2 size={20} /></button>
+            
+            <button
+                onClick={handleExportPDF}
+                className="p-2.5 text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 hover:text-blue-600 rounded-lg transition-all shadow-sm"
+                title="Export Schedule as PDF"
+            >
+                <FileDown size={20} />
+            </button>
+
+            <button
+                onClick={handleClearSchedule}
+                disabled={localFlights.length === 0}
+                className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                title="Clear Entire Schedule"
+            >
+                <Trash2 size={20} />
+            </button>
+            
             <div className="h-6 w-px bg-slate-200 mx-2 hidden sm:block"></div>
-            <button onClick={handleSyncReq} disabled={isSyncing || isSynced} title={syncProps.tooltip} className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold shadow-md transition-all border text-white ${syncProps.color} disabled:opacity-90 disabled:cursor-not-allowed`}>
-                {syncProps.icon} {syncProps.text}
+
+            <button 
+                onClick={handleSyncReq}
+                disabled={isSyncing || isSynced}
+                title={syncProps.tooltip}
+                className={`
+                    flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold shadow-md transition-all border text-white
+                    ${syncProps.color}
+                    disabled:opacity-90 disabled:cursor-not-allowed
+                `}
+            >
+                {syncProps.icon}
+                {syncProps.text}
             </button>
         </div>
       </div>
 
+      {/* Main Content Area */}
       <div className="flex-1 overflow-auto p-4 lg:px-6 lg:py-4 custom-scrollbar">
         <div className="min-w-[1300px] flex flex-col pb-10">
+            
+            {/* Spreadsheet Header */}
             <div className={`grid ${gridCols} bg-slate-800 text-slate-200 text-[11px] font-bold uppercase tracking-wider sticky top-0 z-20 shadow-md rounded-t-lg border-x border-t border-slate-800`}>
                 <div className="px-3 py-3 border-r border-slate-700/50 flex items-center">Customer</div>
                 <div className="px-3 py-3 border-r border-slate-700/50 flex items-center gap-1.5"><Hash size={12} className="text-slate-400"/> Cus #</div>
@@ -413,19 +480,25 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
                 <div className="px-3 py-3 text-center"></div>
             </div>
 
+            {/* Aircraft Groups */}
             <div className="flex flex-col gap-8 mt-0 bg-slate-100/50 pt-2">
             {aircraftGroups.map((groupType) => {
                 const groupFleet = fleet.filter(f => f.type === groupType).sort((a,b) => a.registration.localeCompare(b.registration));
+                
                 if (groupFleet.length === 0) return null;
 
                 return (
                     <div key={groupType} className="flex flex-col gap-5">
+                        {/* Group Header */}
                         <div className="flex items-center gap-4 px-3 py-2 mt-4 bg-slate-200/50 border-y border-slate-200 backdrop-blur-sm sticky top-[42px] z-10">
                             <h3 className="text-lg font-black text-slate-700 uppercase tracking-widest">{groupType} Fleet</h3>
                             <div className="h-1 bg-slate-300 flex-1 rounded-full opacity-50"></div>
-                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide bg-slate-100 px-2 py-0.5 rounded border border-slate-300">{groupFleet.length} Aircraft</span>
+                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide bg-slate-100 px-2 py-0.5 rounded border border-slate-300">
+                            {groupFleet.length} Aircraft
+                            </span>
                         </div>
 
+                        {/* Aircraft Cards in this Group */}
                         <div className="flex flex-col gap-5 px-1">
                         {groupFleet.map((aircraft) => {
                             const groupedFlights = getGroupedFlights(localFlights, aircraft.registration);
@@ -433,21 +506,57 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
                             const theme = getAircraftTheme();
                             
                             return (
-                                <div key={aircraft.registration} className={`group/section bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden hover:shadow-lg hover:border-slate-400 transition-all duration-300`}>
-                                    <div className={`flex items-center justify-between px-4 py-2 border-b border-slate-200 transition-colors ${isMaintenance ? 'bg-amber-50/80 border-l-[6px] border-l-amber-500' : `${theme.bg} border-l-[6px] border-l-${theme.accent.replace('bg-', '')}`}`}>
-                                        <div className="flex items-center gap-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm text-white ${isMaintenance ? 'bg-amber-500' : theme.accent}`}><Plane size={16} fill="currentColor" className="opacity-90" /></div>
-                                                <div className="flex flex-col">
-                                                    <span className={`block font-extrabold text-base leading-tight ${isMaintenance ? 'text-amber-900' : theme.text}`}>{aircraft.registration}</span>
-                                                    <span className="block text-[10px] font-bold opacity-60 uppercase tracking-wide leading-tight">{aircraft.type}</span>
-                                                </div>
+                                <div 
+                                    key={aircraft.registration} 
+                                    className={`
+                                        group/section bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden
+                                        hover:shadow-lg hover:border-slate-400 transition-all duration-300
+                                    `}
+                                >
+                                    {/* Aircraft Header Row */}
+                                    <div className={`
+                                    flex items-center justify-between px-4 py-2 border-b border-slate-200 transition-colors
+                                    ${isMaintenance ? 'bg-amber-50/80 border-l-[6px] border-l-amber-500' : `${theme.bg} border-l-[6px] border-l-${theme.accent.replace('bg-', '')}`}
+                                    `}>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm text-white ${isMaintenance ? 'bg-amber-500' : theme.accent}`}>
+                                            <Plane size={16} fill="currentColor" className="opacity-90" />
                                             </div>
-                                            {isMaintenance && <span className="text-[10px] font-bold text-amber-700 uppercase flex items-center gap-1 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 shadow-sm"><AlertCircle size={10} /> {aircraft.status}</span>}
+                                            <div className="flex flex-col">
+                                                <span className={`block font-extrabold text-base leading-tight ${isMaintenance ? 'text-amber-900' : theme.text}`}>
+                                                {aircraft.registration}
+                                                </span>
+                                                <span className="block text-[10px] font-bold opacity-60 uppercase tracking-wide leading-tight">
+                                                {aircraft.type}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <button onClick={() => handleAddRow(aircraft)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${isMaintenance ? 'text-amber-800 hover:bg-amber-100 bg-amber-50 border border-amber-200' : `text-slate-600 bg-white border border-slate-200 hover:border-${theme.accent.replace('bg-', '')} hover:text-${theme.accent.replace('bg-', '')} shadow-sm`}`}><Plus size={14} strokeWidth={3} /> Add Flight</button>
+                
+                                        {isMaintenance && (
+                                        <span className="text-[10px] font-bold text-amber-700 uppercase flex items-center gap-1 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 shadow-sm">
+                                            <AlertCircle size={10} /> {aircraft.status}
+                                        </span>
+                                        )}
+                                    </div>
+                                    
+                                    <button 
+                                        onClick={() => handleAddRow(aircraft)}
+                                        className={`
+                                        flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all
+                                        ${isMaintenance 
+                                            ? 'text-amber-800 hover:bg-amber-100 bg-amber-50 border border-amber-200' 
+                                            : `text-slate-600 bg-white border border-slate-200 hover:border-${theme.accent.replace('bg-', '')} hover:text-${theme.accent.replace('bg-', '')} shadow-sm`
+                                        }
+                                        `}
+                                        title="Add Flight Row"
+                                    >
+                                        <Plus size={14} strokeWidth={3} />
+                                        Add Flight
+                                    </button>
                                     </div>
                 
+                                    {/* Flight Rows */}
                                     <div className="divide-y divide-slate-100 border-t border-slate-100">
                                     {groupedFlights.map((flight) => {
                                         const routeParts = getRouteParts(flight.route);
@@ -455,73 +564,213 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
                                         return (
                                         <div key={flight.id} className={`grid ${gridCols} transition-all group/row hover:bg-blue-50/30`}>
-                                            <div className={`${cellWrapperClass} relative`}>
-                                                {isSegment && (
-                                                    <div className="absolute left-0 top-0 bottom-0 w-6 flex flex-col items-center pointer-events-none z-20">
-                                                        <div className="h-1/2 w-px bg-slate-300 border-l border-slate-300 absolute top-0 left-3"></div>
-                                                        <div className="w-3 h-px bg-slate-300 border-t border-slate-300 absolute top-1/2 left-3"></div>
-                                                    </div>
-                                                )}
-                                                <div className={`relative w-full h-full ${isSegment ? 'pl-5' : ''}`}>
-                                                    <select value={flight.customer || ''} onChange={(e) => handleCustomerChange(flight.id, e.target.value)} className={`${selectClass} ${isSegment ? 'text-slate-600 font-medium' : 'font-bold'}`}>
-                                                        <option value="">Select Customer...</option>
-                                                        {customers.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                                    </select>
-                                                    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                        
+                                        {/* Customer - Modified for Segments / Tree View */}
+                                        <div className={`${cellWrapperClass} relative`}>
+                                            {isSegment && (
+                                                <div className="absolute left-0 top-0 bottom-0 w-6 flex flex-col items-center pointer-events-none z-20">
+                                                    {/* Vertical Line from top, ending at middle */}
+                                                    <div className="h-1/2 w-px bg-slate-300 border-l border-slate-300 absolute top-0 left-3"></div>
+                                                    {/* Horizontal Line from middle to right */}
+                                                    <div className="w-3 h-px bg-slate-300 border-t border-slate-300 absolute top-1/2 left-3"></div>
                                                 </div>
-                                            </div>
-                                            <div className={cellWrapperClass}><input value={flight.customerId || ''} onChange={(e) => handleCellChange(flight.id, 'customerId', e.target.value)} className={`${inputClass} text-slate-600 font-mono text-center`} placeholder="---" /></div>
+                                            )}
                                             
-                                            {/* From Route */}
-                                            <div className={cellWrapperClass}>
-                                                <input list="location-list" value={routeParts.from} onChange={(e) => handleRouteChange(flight.id, `${e.target.value.toUpperCase()}-${routeParts.to}`)} className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`} placeholder="DEP" />
-                                            </div>
-                                            
-                                            {/* To Route */}
-                                            <div className={cellWrapperClass}>
-                                                <input list="location-list" value={routeParts.to} onChange={(e) => handleRouteChange(flight.id, `${routeParts.from}-${e.target.value.toUpperCase()}`)} className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`} placeholder="ARR" />
-                                            </div>
-                
-                                            <div className={cellWrapperClass}>
-                                                <select value={flight.pic} onChange={(e) => handleCellChange(flight.id, 'pic', e.target.value)} className={`${selectClass} text-center font-bold text-slate-800 uppercase`}>
-                                                    <option value="">--</option>
-                                                    {pilots.map(p => <option key={p.code} value={p.code}>{p.code}</option>)}
+                                            <div className={`relative w-full h-full ${isSegment ? 'pl-5' : ''}`}>
+                                                <select 
+                                                    value={flight.customer || ''}
+                                                    onChange={(e) => handleCustomerChange(flight.id, e.target.value)}
+                                                    className={`${selectClass} ${isSegment ? 'text-slate-600 font-medium' : 'font-bold'}`}
+                                                >
+                                                    <option value="">Select Customer...</option>
+                                                    {customers.map(c => (
+                                                        <option key={c.id} value={c.name}>{c.name}</option>
+                                                    ))}
                                                 </select>
-                                                <ChevronDown size={12} className="absolute right-2 text-slate-400 pointer-events-none" />
-                                            </div>
-                                            <div className={cellWrapperClass}>
-                                                <select value={flight.sic} onChange={(e) => handleCellChange(flight.id, 'sic', e.target.value)} className={`${selectClass} text-center font-medium text-slate-600 uppercase`}>
-                                                    <option value="">--</option>
-                                                    {pilots.map(p => <option key={p.code} value={p.code}>{p.code}</option>)}
-                                                </select>
-                                                <ChevronDown size={12} className="absolute right-2 text-slate-400 pointer-events-none" />
-                                            </div>
-                                            <div className="border-r border-slate-100 p-0 relative bg-slate-50/50"><div className="w-full h-full flex items-center justify-center text-[10px] text-slate-300 select-none cursor-not-allowed">--</div></div>
-                                            <div className={cellWrapperClass}>
-                                                <input type="text" value={flight.etd} placeholder="HH:MM" maxLength={5} onChange={(e) => handleCellChange(flight.id, 'etd', e.target.value)} onBlur={(e) => { let val = e.target.value.trim(); if (val.length === 4 && !val.includes(':') && /^\d+$/.test(val)) { val = `${val.slice(0, 2)}:${val.slice(2)}`; handleCellChange(flight.id, 'etd', val); } else if (val.includes(':') && val.split(':')[0].length === 1) { val = val.padStart(5, '0'); handleCellChange(flight.id, 'etd', val); } }} className={`${inputClass} text-center font-bold text-slate-950`} />
-                                            </div>
-                                            <div className={cellWrapperClass}>
-                                                <select value={flight.status} onChange={(e) => handleCellChange(flight.id, 'status', e.target.value as any)} className={`${selectClass} ${getStatusColor(flight.status)} text-[11px] font-bold uppercase tracking-tight`}>
-                                                    <option value="Scheduled">Scheduled</option>
-                                                    <option value="Outbound">Outbound</option>
-                                                    <option value="Inbound">Inbound</option>
-                                                    <option value="On Ground">On Ground</option>
-                                                    <option value="Delayed">Delayed</option>
-                                                    <option value="Cancelled">Cancelled</option>
-                                                    <option value="Completed">Completed</option>
-                                                </select>
-                                                <ChevronDown size={12} className="absolute right-2 text-slate-400 pointer-events-none" />
-                                            </div>
-                                            <div className={cellWrapperClass}><input value={flight.commercialTime || ''} onChange={(e) => handleCellChange(flight.id, 'commercialTime', e.target.value)} className={`${inputClass} text-center font-mono text-slate-700`} placeholder="H:MM" /></div>
-                                            <div className={`${cellWrapperClass} flex items-center pl-3`}><span className="text-slate-400 font-bold text-sm mr-0.5 select-none">TGY</span><input value={flight.flightNumber.replace(/^TGY/i, '')} onChange={(e) => { const num = e.target.value.replace(/[^0-9]/g, ''); handleCellChange(flight.id, 'flightNumber', num ? `TGY${num}` : ''); }} className={`${inputClass} !px-0 !w-full font-bold text-slate-950 uppercase`} placeholder="----" /></div>
-                                            <div className={cellWrapperClass}><input value={flight.notes || ''} onChange={(e) => handleCellChange(flight.id, 'notes', e.target.value)} className={`${inputClass} text-slate-700 truncate`} placeholder="Notes..." /></div>
-                                            <div className="flex items-center justify-center gap-1 bg-slate-50 border-r border-transparent px-1">
-                                                <button onClick={() => handleAddSegment(flight)} className="text-slate-300 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded transition-all opacity-0 group-hover/row:opacity-100"><Plus size={16} /></button>
-                                                <button onClick={() => handleAddReturn(flight)} className="text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded transition-all opacity-0 group-hover/row:opacity-100"><ArrowRightLeft size={16} /></button>
-                                                <button onClick={() => handleDeleteRow(flight.id)} className="text-slate-300 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-all opacity-0 group-hover/row:opacity-100"><Trash2 size={16} /></button>
+                                                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                             </div>
                                         </div>
-                                        );
+                
+                                        {/* Customer ID */}
+                                        <div className={cellWrapperClass}>
+                                            <input 
+                                            value={flight.customerId || ''}
+                                            onChange={(e) => handleCellChange(flight.id, 'customerId', e.target.value)}
+                                            className={`${inputClass} text-slate-600 font-mono text-center`}
+                                            placeholder="---"
+                                            />
+                                        </div>
+                
+                                        {/* Route - From */}
+                                        <div className={cellWrapperClass}>
+                                            <input 
+                                                list="location-options" // UPDATED to match datalist ID
+                                                value={routeParts.from}
+                                                onChange={(e) => {
+                                                    const newVal = e.target.value.toUpperCase();
+                                                    handleRouteChange(flight.id, `${newVal}-${routeParts.to}`);
+                                                }}
+                                                className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`}
+                                                placeholder="DEP"
+                                            />
+                                        </div>
+
+                                        {/* Route - To */}
+                                        <div className={cellWrapperClass}>
+                                            <input 
+                                                list="location-options" // UPDATED to match datalist ID
+                                                value={routeParts.to}
+                                                onChange={(e) => {
+                                                    const newVal = e.target.value.toUpperCase();
+                                                    handleRouteChange(flight.id, `${routeParts.from}-${newVal}`);
+                                                }}
+                                                className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`}
+                                                placeholder="ARR"
+                                            />
+                                        </div>
+                
+                                        {/* PIC Select */}
+                                        <div className={cellWrapperClass}>
+                                            <select 
+                                            value={flight.pic}
+                                            onChange={(e) => handleCellChange(flight.id, 'pic', e.target.value)}
+                                            className={`${selectClass} text-center font-bold text-slate-800 uppercase`}
+                                            >
+                                                <option value="">--</option>
+                                                {pilots.map(p => (
+                                                <option key={p.code} value={p.code}>{p.code}</option>
+                                                ))}
+                                            </select>
+                                            <ChevronDown size={12} className="absolute right-2 text-slate-400 pointer-events-none" />
+                                        </div>
+                
+                                        {/* SIC Select */}
+                                        <div className={cellWrapperClass}>
+                                            <select 
+                                            value={flight.sic}
+                                            onChange={(e) => handleCellChange(flight.id, 'sic', e.target.value)}
+                                            className={`${selectClass} text-center font-medium text-slate-600 uppercase`}
+                                            >
+                                                <option value="">--</option>
+                                                {pilots.map(p => (
+                                                <option key={p.code} value={p.code}>{p.code}</option>
+                                                ))}
+                                            </select>
+                                            <ChevronDown size={12} className="absolute right-2 text-slate-400 pointer-events-none" />
+                                        </div>
+                                        
+                                        {/* OC Placeholder */}
+                                        <div className="border-r border-slate-100 p-0 relative bg-slate-50/50">
+                                            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-300 select-none cursor-not-allowed">
+                                            --
+                                            </div>
+                                        </div>
+                
+                                        {/* ETD - Changed to Text Input for 24H Enforcement */}
+                                        <div className={cellWrapperClass}>
+                                            <input 
+                                            type="text"
+                                            value={flight.etd}
+                                            placeholder="HH:MM"
+                                            maxLength={5}
+                                            onChange={(e) => handleCellChange(flight.id, 'etd', e.target.value)}
+                                            onBlur={(e) => {
+                                                let val = e.target.value.trim();
+                                                // Auto-format "0800" to "08:00"
+                                                if (val.length === 4 && !val.includes(':') && /^\d+$/.test(val)) {
+                                                    val = `${val.slice(0, 2)}:${val.slice(2)}`;
+                                                    handleCellChange(flight.id, 'etd', val);
+                                                }
+                                                // Pad "8:00" to "08:00"
+                                                else if (val.includes(':') && val.split(':')[0].length === 1) {
+                                                    val = val.padStart(5, '0');
+                                                    handleCellChange(flight.id, 'etd', val);
+                                                }
+                                            }}
+                                            className={`${inputClass} text-center font-bold text-slate-950`}
+                                            />
+                                        </div>
+
+                                        {/* Status Select */}
+                                        <div className={cellWrapperClass}>
+                                            <select 
+                                            value={flight.status}
+                                            onChange={(e) => handleCellChange(flight.id, 'status', e.target.value as any)}
+                                            className={`${selectClass} ${getStatusColor(flight.status)} text-[11px] font-bold uppercase tracking-tight`}
+                                            >
+                                                <option value="Scheduled">Scheduled</option>
+                                                <option value="Outbound">Outbound</option>
+                                                <option value="Inbound">Inbound</option>
+                                                <option value="On Ground">On Ground</option>
+                                                <option value="Delayed">Delayed</option>
+                                                <option value="Cancelled">Cancelled</option>
+                                                <option value="Completed">Completed</option>
+                                            </select>
+                                            <ChevronDown size={12} className="absolute right-2 text-slate-400 pointer-events-none" />
+                                        </div>
+
+                                        {/* Commercial Time (C/Time) */}
+                                        <div className={cellWrapperClass}>
+                                            <input 
+                                            value={flight.commercialTime || ''}
+                                            onChange={(e) => handleCellChange(flight.id, 'commercialTime', e.target.value)}
+                                            className={`${inputClass} text-center font-mono text-slate-700`}
+                                            placeholder="H:MM"
+                                            />
+                                        </div>
+                
+                                        {/* Flight Number (Prefix TGY) */}
+                                        <div className={`${cellWrapperClass} flex items-center pl-3`}>
+                                            <span className="text-slate-400 font-bold text-sm mr-0.5 select-none">TGY</span>
+                                            <input 
+                                            value={flight.flightNumber.replace(/^TGY/i, '')}
+                                            onChange={(e) => {
+                                                const num = e.target.value.replace(/[^0-9]/g, '');
+                                                handleCellChange(flight.id, 'flightNumber', num ? `TGY${num}` : '');
+                                            }}
+                                            className={`${inputClass} !px-0 !w-full font-bold text-slate-950 uppercase`}
+                                            placeholder="----"
+                                            />
+                                        </div>
+                
+                                        {/* Comments */}
+                                        <div className={cellWrapperClass}>
+                                            <input 
+                                            value={flight.notes || ''}
+                                            onChange={(e) => handleCellChange(flight.id, 'notes', e.target.value)}
+                                            className={`${inputClass} text-slate-700 truncate`}
+                                            placeholder="Notes..."
+                                            />
+                                        </div>
+                
+                                        {/* Actions */}
+                                        <div className="flex items-center justify-center gap-1 bg-slate-50 border-r border-transparent px-1">
+                                            <button 
+                                                onClick={() => handleAddSegment(flight)}
+                                                className="text-slate-300 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded transition-all opacity-0 group-hover/row:opacity-100"
+                                                title="Add Segment"
+                                            >
+                                                <Plus size={16} />
+                                            </button>
+                                            {/* New Return Button */}
+                                            <button 
+                                                onClick={() => handleAddReturn(flight)}
+                                                className="text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded transition-all opacity-0 group-hover/row:opacity-100"
+                                                title="Create Return Flight"
+                                            >
+                                                <ArrowRightLeft size={16} />
+                                            </button>
+                                            <button 
+                                                onClick={() => handleDeleteRow(flight.id)}
+                                                className="text-slate-300 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition-all opacity-0 group-hover/row:opacity-100"
+                                                title="Delete Row"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                
+                                        </div>
+                                    );
                                     })}
                                     </div>
                                 </div>
@@ -533,35 +782,49 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
             })}
             </div>
             
-            <datalist id="location-list">
-                {locations.length > 0 ? (
-                    locations.map(l => <option key={l.id} value={l.code}>{l.name}</option>)
-                ) : (
-                    // Fallback to route-derived unique codes
-                    Array.from(new Set(routes.flatMap(r => r.code.split('-')))).sort().map(code => (
-                        <option key={code} value={code} />
-                    ))
-                )}
+            {/* DATALIST for Locations - Using locations prop now! */}
+            <datalist id="location-options">
+                {locations.map(loc => (
+                    <option key={loc.id} value={loc.code}>{loc.name}</option>
+                ))}
             </datalist>
 
         </div>
       </div>
 
+      {/* Sync Confirmation Modal */}
       {showConfirmSync && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-in zoom-in-95 duration-200 ring-1 ring-slate-900/5">
                 <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600"><Save size={20} strokeWidth={2.5} /></div>
+                    <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                        <Save size={20} strokeWidth={2.5} />
+                    </div>
                     <h3 className="text-xl font-bold text-slate-900">Sync to Dashboard?</h3>
                 </div>
-                <p className="text-slate-600 mb-6 leading-relaxed">You are about to push unsaved changes for <strong>{new Date(currentDate).toLocaleDateString()}</strong> to the main dashboard. This will immediately update the live schedule for all users.</p>
+                
+                <p className="text-slate-600 mb-6 leading-relaxed">
+                    You are about to push unsaved changes for <strong>{new Date(currentDate).toLocaleDateString()}</strong> to the main dashboard. This will immediately update the live schedule for all users.
+                </p>
+                
                 <div className="flex justify-end gap-3">
-                    <button onClick={() => setShowConfirmSync(false)} className="px-5 py-2.5 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors text-sm">Cancel</button>
-                    <button onClick={executeSync} className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 text-sm transform active:scale-95">Confirm Sync</button>
+                    <button 
+                        onClick={() => setShowConfirmSync(false)}
+                        className="px-5 py-2.5 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors text-sm"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={executeSync}
+                        className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 text-sm transform active:scale-95"
+                    >
+                        Confirm Sync
+                    </button>
                 </div>
             </div>
         </div>
       )}
+
     </div>
   );
 };

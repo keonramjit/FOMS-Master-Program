@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RouteDefinition, LocationDefinition, SystemSettings } from '../types';
 import { Trash2, Plus, Edit2, Save, MapPin, Upload, FileSpreadsheet, Loader2, Search, ChevronLeft, ChevronRight, ArrowRight, Route, Globe, Lock } from 'lucide-react';
 import { FeatureGate } from './FeatureGate';
@@ -65,6 +65,43 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
     }
     return parseFloat(str) || 0;
   };
+
+  const calculateDefaultsFromDistance = (distance: number) => {
+      if (!distance || distance <= 0) return null;
+
+      // Assumptions
+      const speed208B = 150; // knots
+      const speed208EX = 160; // knots
+      const buffer = 0.25; // 15 mins taxi/circuit buffer
+
+      // C208B
+      const ft208b = parseFloat((distance / speed208B).toFixed(2));
+      const ct208b = parseFloat((ft208b + buffer).toFixed(2));
+
+      // C208EX
+      const ft208ex = parseFloat((distance / speed208EX).toFixed(2));
+      const ct208ex = parseFloat((ft208ex + buffer).toFixed(2));
+
+      return {
+          ft208b: decimalToHm(ft208b),
+          ct208b: decimalToHm(ct208b),
+          ft208ex: decimalToHm(ft208ex),
+          ct208ex: decimalToHm(ct208ex)
+      };
+  };
+
+  // Auto-fill times when distance changes IF fields are empty
+  useEffect(() => {
+      if (routeForm.distance && !editingId) {
+          const defaults = calculateDefaultsFromDistance(routeForm.distance);
+          if (defaults) {
+              if (!times208B.ft) setTimes208B(prev => ({ ...prev, ft: defaults.ft208b }));
+              if (!times208B.ct) setTimes208B(prev => ({ ...prev, ct: defaults.ct208b }));
+              if (!times208EX.ft) setTimes208EX(prev => ({ ...prev, ft: defaults.ft208ex }));
+              if (!times208EX.ct) setTimes208EX(prev => ({ ...prev, ct: defaults.ct208ex }));
+          }
+      }
+  }, [routeForm.distance, editingId]); // Run when distance changes, but mostly for new entries
 
   // -- Route Handlers --
 
@@ -200,12 +237,23 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
             if (!code) continue;
             
             const distance = parseFloat(parts[3]?.trim() || '0');
-            const ft208b = hmToDecimal(parts[4]?.trim());
-            const buf208b = hmToDecimal(parts[5]?.trim());
-            const ct208b = hmToDecimal(parts[6]?.trim());
-            const ft208ex = hmToDecimal(parts[7]?.trim());
-            const buf208ex = hmToDecimal(parts[8]?.trim());
-            const ct208ex = hmToDecimal(parts[9]?.trim());
+            
+            // Auto Calculate Defaults if CSV fields missing but distance exists
+            const defaults = calculateDefaultsFromDistance(distance);
+            
+            let ft208b = hmToDecimal(parts[4]?.trim());
+            let buf208b = hmToDecimal(parts[5]?.trim());
+            let ct208b = hmToDecimal(parts[6]?.trim());
+            let ft208ex = hmToDecimal(parts[7]?.trim());
+            let buf208ex = hmToDecimal(parts[8]?.trim());
+            let ct208ex = hmToDecimal(parts[9]?.trim());
+
+            if (defaults) {
+                if (!ft208b) ft208b = hmToDecimal(defaults.ft208b);
+                if (!ct208b) ct208b = hmToDecimal(defaults.ct208b);
+                if (!ft208ex) ft208ex = hmToDecimal(defaults.ft208ex);
+                if (!ct208ex) ct208ex = hmToDecimal(defaults.ct208ex);
+            }
             
             const exists = routes.some(r => r.code === code);
             if (!exists) {
@@ -271,7 +319,7 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
             
             const parts = line.split(',');
             const code = parts[0]?.trim().toUpperCase();
-            // Handle names that might contain commas if they weren't strictly quoted (basic assumption here is Name is the last part or rest of line)
+            // Handle names that might contain commas if they weren't strictly quoted
             const name = parts.slice(1).join(',').trim().replace(/^"|"$/g, '');
             
             if (!code || !name) continue;
