@@ -47,7 +47,6 @@ import {
 } from './services/firebase';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Code Splitting - Lazy Load Major Components
 const CrewManager = React.lazy(() => import('./components/CrewManager').then(module => ({ default: module.CrewManager })));
 const FleetManager = React.lazy(() => import('./components/FleetManager').then(module => ({ default: module.FleetManager })));
 const FlightPlanning = React.lazy(() => import('./components/FlightPlanning').then(module => ({ default: module.FlightPlanning })));
@@ -59,13 +58,11 @@ const TrainingManager = React.lazy(() => import('./components/TrainingManager').
 const SubscriptionManagement = React.lazy(() => import('./components/SubscriptionManagement').then(module => ({ default: module.SubscriptionManagement })));
 
 const App: React.FC = () => {
-  // Auth State
   const [user, setUser] = useState<any | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isDemoMode, setIsDemoMode] = useState(false);
 
-  // App State
   const [currentView, setCurrentView] = useState('dashboard');
   
   const [currentDate, setCurrentDate] = useState<string>(() => {
@@ -79,7 +76,6 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
   
-  // Data State
   const [flights, setFlights] = useState<Flight[]>([]);
   const [crewRoster, setCrewRoster] = useState<(CrewMember & { _docId: string })[]>([]);
   const [fleet, setFleet] = useState<(Aircraft & { _docId: string })[]>([]);
@@ -87,7 +83,6 @@ const App: React.FC = () => {
   const [locations, setLocations] = useState<LocationDefinition[]>([]);
   const [customers, setCustomers] = useState<CustomerDefinition[]>([]);
   
-  // System Settings / Features
   const [features, setFeatures] = useState<SystemSettings>({
     enableFleetManagement: true,
     enableCrewManagement: true,
@@ -107,23 +102,20 @@ const App: React.FC = () => {
   const [editingFlight, setEditingFlight] = useState<Flight | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 1. Listen for Auth Changes AND Fetch Profile
   useEffect(() => {
     const unsubscribe = subscribeToAuth(async (currentUser) => {
       setUser(currentUser);
       
       if (currentUser) {
-          // Fetch the profile
           const profile = await getUserProfile(currentUser.email);
           if (profile) {
               setUserProfile(profile);
           } else {
-              // Create default profile if missing (helpful for testing)
               const newProfile: UserProfile = {
                   email: currentUser.email,
                   name: currentUser.displayName || 'New User',
-                  role: 'dispatcher', // Default role
-                  orgId: 'trans_guyana' // Default org
+                  role: 'dispatcher',
+                  orgId: 'trans_guyana'
               };
               await createUserProfile(newProfile);
               setUserProfile(newProfile);
@@ -137,7 +129,6 @@ const App: React.FC = () => {
     return unsubscribe;
   }, []);
 
-  // 2. Subscribe to Data & Organization Settings
   useEffect(() => {
     if (isDemoMode) {
         setFlights(INITIAL_FLIGHTS);
@@ -151,8 +142,6 @@ const App: React.FC = () => {
 
     if (!user) return;
 
-    // SAAS LOGIC: Subscribe to Organization License instead of global System Settings
-    // Default to 'trans_guyana' if user has no orgId yet
     const orgId = userProfile?.orgId || 'trans_guyana';
     
     const unsubscribeOrg = subscribeToOrganization(orgId, (org) => {
@@ -186,7 +175,6 @@ const App: React.FC = () => {
     };
   }, [user, userProfile?.orgId, isDemoMode]);
 
-  // 3. Flight Subscription
   useEffect(() => {
     if (!user || isDemoMode) return;
     const unsubscribeFlights = subscribeToFlights(currentDate, (data) => {
@@ -197,7 +185,6 @@ const App: React.FC = () => {
     };
   }, [user, currentDate, isDemoMode]);
 
-  // Stats Logic
   const stats: OperationsStats = useMemo(() => {
     const todaysFlights = flights.filter(f => f.date === currentDate);
     const hours = todaysFlights.reduce((acc, f) => acc + (f.flightTime || 0), 0);
@@ -221,7 +208,6 @@ const App: React.FC = () => {
       .sort((a, b) => (a.etd || '').localeCompare(b.etd || '')), 
   [flights, currentDate]);
 
-  // Handlers
   const handleStatusUpdate = async (id: string, newStatus: FlightStatus) => {
     try {
       if (isDemoMode) setFlights(prev => prev.map(f => f.id === id ? { ...f, status: newStatus } : f));
@@ -266,7 +252,6 @@ const App: React.FC = () => {
       />
 
       <main className={`flex-1 overflow-y-auto relative w-full transition-all duration-300 ${isDesktopSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
-        {/* Mobile Header */}
         <div className="lg:hidden bg-slate-900 text-white p-4 flex items-center justify-between shadow-md sticky top-0 z-20">
             <div className="flex items-center gap-3">
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0"><PlaneTakeoff className="text-white" size={18} /></div>
@@ -283,7 +268,7 @@ const App: React.FC = () => {
                         userProfile={userProfile}
                         onUpdateLicense={async (s) => {
                             const orgId = userProfile?.orgId || 'trans_guyana';
-                            await updateOrganizationLicense(orgId, { modules: { ...features, ...s } });
+                            await updateOrganizationLicense(orgId, { ...features, ...s });
                         }}
                     />
                 ) : currentView === 'crew' && features.enableCrewManagement ? (
@@ -291,9 +276,17 @@ const App: React.FC = () => {
                 ) : currentView === 'fleet' && features.enableFleetManagement ? (
                     <FleetManager fleet={fleet} flights={flights} onAdd={addAircraft} onUpdate={updateAircraft} features={features} />
                 ) : currentView === 'planning' && features.enableFlightPlanning ? (
-                    <FlightPlanning currentDate={currentDate} onDateChange={setCurrentDate} flights={flights} fleet={fleet} crew={crewRoster} routes={routes} customers={customers} onAddFlight={addFlight} onUpdateFlight={updateFlight} onDeleteFlight={deleteFlight} locations={locations} features={features} />
+                    <FlightPlanning currentDate={currentDate} onDateChange={setCurrentDate} flights={flights} fleet={fleet} crew={crewRoster} routes={routes} locations={locations} customers={customers} onAddFlight={addFlight} onUpdateFlight={updateFlight} onDeleteFlight={deleteFlight} />
                 ) : currentView === 'dispatch' ? (
-                    <DispatchManager flights={flights} fleet={fleet} crew={crewRoster} currentDate={currentDate} isEnabled={features.enableDispatch} onDateChange={setCurrentDate} features={features} />
+                    <DispatchManager 
+                        flights={flights} 
+                        fleet={fleet} 
+                        crew={crewRoster} 
+                        currentDate={currentDate} 
+                        isEnabled={features.enableDispatch} 
+                        onDateChange={setCurrentDate}
+                        features={features} // Added prop here
+                    />
                 ) : currentView === 'voyage' ? (
                     <VoyageReportManager flights={flights} crew={crewRoster} currentDate={currentDate} isEnabled={features.enableVoyageReports} onDateChange={setCurrentDate} />
                 ) : currentView === 'training' ? (
@@ -345,7 +338,7 @@ const App: React.FC = () => {
         </Suspense>
       </main>
 
-      <FlightModal isOpen={isFlightModalOpen} onClose={() => setIsFlightModalOpen(false)} onSave={handleSaveFlight} editingFlight={editingFlight} fleet={fleet} crew={crewRoster} customers={customers} flights={flights} features={features} locations={locations} routes={routes} />
+      <FlightModal isOpen={isFlightModalOpen} onClose={() => setIsFlightModalOpen(false)} onSave={handleSaveFlight} editingFlight={editingFlight} fleet={fleet} crew={crewRoster} customers={customers} flights={flights} features={features} />
     </div>
   );
 };

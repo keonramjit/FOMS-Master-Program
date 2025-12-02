@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Flight, Aircraft, CrewMember, CustomerDefinition, SystemSettings, LocationDefinition, RouteDefinition } from '../types';
+import { Flight, Aircraft, CrewMember, CustomerDefinition, SystemSettings, TrainingRecord } from '../types';
 import { X, Save, Plane, Calendar, Clock, User, MapPin, ChevronDown, ArrowRightLeft, Timer, Hash, AlertTriangle } from 'lucide-react';
 import { fetchCrewTrainingRecords } from '../services/firebase';
 
@@ -13,8 +13,6 @@ interface FlightModalProps {
   customers?: CustomerDefinition[];
   flights: Flight[];
   features: SystemSettings;
-  locations?: LocationDefinition[];
-  routes?: RouteDefinition[];
 }
 
 export const FlightModal: React.FC<FlightModalProps> = ({ 
@@ -26,9 +24,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   crew,
   customers = [],
   flights,
-  features,
-  locations = [],
-  routes = []
+  features
 }) => {
   const [formData, setFormData] = useState<Partial<Flight>>({
     flightNumber: '',
@@ -52,19 +48,53 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Split Route Logic
-  const [fromLoc, setFromLoc] = useState('');
-  const [toLoc, setToLoc] = useState('');
-  const [routeError, setRouteError] = useState<string | null>(null);
+  // NEW: Validation Logic (FDP & Training)
+  const validatePilot = async (crewCode: string, date: string, flightDuration: number) => {
+      const newWarnings: string[] = [];
+      if (!crewCode || !date) {
+          setWarnings([]);
+          return;
+      }
 
-  // Helper to convert decimal to H:MM for display if needed, 
-  // but formData uses decimal for flightTime, string H:MM for commercialTime.
-  const decimalToHm = (val?: number) => {
-      if (val === undefined || val === null || isNaN(val)) return '';
-      const hrs = Math.floor(val);
-      const mins = Math.round((val - hrs) * 60);
-      const minsStr = mins.toString().padStart(2, '0');
-      return `${hrs}:${minsStr}`;
+      // 1. FDP Check
+      if (features.enableCrewFDP) {
+          const pilotDailyFlights = flights.filter(f => 
+              f.date === date && 
+              (f.pic === crewCode || f.sic === crewCode) && 
+              (editingFlight ? f.id !== editingFlight.id : true)
+          );
+          
+          const previousHours = pilotDailyFlights.reduce((acc, f) => acc + (f.flightTime || 0), 0);
+          const potentialTotal = previousHours + flightDuration;
+
+          if (potentialTotal > 8) {
+              newWarnings.push(`FDP Alert: Pilot has flown ${previousHours.toFixed(1)}h today. Adding this flight (${flightDuration}h) exceeds 8h limit.`);
+          }
+      }
+
+      // 2. Training/License Check
+      if (features.enableTrainingManagement) {
+          try {
+              const records = await fetchCrewTrainingRecords(crewCode);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0); 
+              
+              const relevantTypes = ['Medical', 'License'];
+              
+              records.forEach(r => {
+                  if (relevantTypes.includes(r.type)) {
+                      const expiry = new Date(r.expiryDate);
+                      if (expiry < today) {
+                          newWarnings.push(`Expired Document: ${r.type} expired on ${r.expiryDate}`);
+                      }
+                  }
+              });
+          } catch (e) {
+              console.error("Validation error", e);
+          }
+      }
+
+      setWarnings(newWarnings);
   };
 
   useEffect(() => {
@@ -72,16 +102,6 @@ export const FlightModal: React.FC<FlightModalProps> = ({
       setFormData(editingFlight);
       setCreateReturn(false);
       if (editingFlight.pic) validatePilot(editingFlight.pic, editingFlight.date, editingFlight.flightTime || 0);
-      
-      // Init split route
-      if (editingFlight.route && editingFlight.route.includes('-')) {
-          const [a, b] = editingFlight.route.split('-');
-          setFromLoc(a);
-          setToLoc(b);
-      } else {
-          setFromLoc(editingFlight.route || '');
-          setToLoc('');
-      }
     } else {
         const d = new Date();
         const todayStr = d.toISOString().split('T')[0];
@@ -90,104 +110,12 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         });
         setCreateReturn(false);
         setWarnings([]);
-        setFromLoc('');
-        setToLoc('');
     }
   }, [editingFlight, isOpen]);
 
-  // Auto-Calculation Effect
-  useEffect(() => {
-      if (features.enableRouteManagement && fromLoc && toLoc) {
-          const code = `${fromLoc.toUpperCase()}-${toLoc.toUpperCase()}`;
-          
-          // Update main route field without resetting everything else
-          if(code !== formData.route) {
-             setFormData(prev => ({ ...prev, route: code }));
-          }
-
-          const foundRoute = routes.find(r => r.code === code);
-
-          if (foundRoute) {
-              setRouteError(null);
-              const type = formData.aircraftType || 'C208B';
-              let flightTime = foundRoute.flightTime || 0;
-              let commTime = foundRoute.commercialTimeC208B || 0;
-
-              if (type === '1900D') {
-                  flightTime = foundRoute.flightTime1900D || flightTime;
-                  commTime = foundRoute.commercialTime1900D || commTime;
-              } else if (type === 'C208EX') {
-                  flightTime = foundRoute.flightTimeC208EX || flightTime;
-                  commTime = foundRoute.commercialTimeC208EX || commTime;
-              } else {
-                  flightTime = foundRoute.flightTimeC208B || flightTime;
-              }
-
-              // Only auto-populate if user hasn't manually entered a value (or if it was 0)
-              // Actually, usually better to overwrite if route changes to keep sync
-              setFormData(prev => ({ 
-                  ...prev, 
-                  flightTime: flightTime,
-                  commercialTime: commTime ? decimalToHm(commTime) : ''
-              }));
-          } else {
-              setRouteError("Route not defined in database.");
-          }
-      } else if (!features.enableRouteManagement) {
-         // Manual mode sync handled by inputs directly updating formData.route
-      }
-  }, [fromLoc, toLoc, formData.aircraftType, routes, features.enableRouteManagement]);
-
-
-  // ... (Keep all other helpers: validatePilot, handleCustomerSelect, generateReturnRoute, etc.) ...
-  // Copying existing helpers for completeness of the file block
-
-  const validatePilot = async (crewCode: string, date: string, flightDuration: number) => {
-    const newWarnings: string[] = [];
-    if (!crewCode || !date) {
-        setWarnings([]);
-        return;
-    }
-
-    if (features.enableCrewFDP) {
-        const pilotDailyFlights = flights.filter(f => 
-            f.date === date && 
-            (f.pic === crewCode || f.sic === crewCode) && 
-            (editingFlight ? f.id !== editingFlight.id : true)
-        );
-        const previousHours = pilotDailyFlights.reduce((acc, f) => acc + (f.flightTime || 0), 0);
-        const potentialTotal = previousHours + flightDuration;
-
-        if (potentialTotal > 8) {
-            newWarnings.push(`FDP Alert: Pilot has flown ${previousHours.toFixed(1)}h today. Adding this flight (${flightDuration}h) exceeds 8h limit.`);
-        }
-    }
-
-    if (features.enableTrainingManagement) {
-        try {
-            const records = await fetchCrewTrainingRecords(crewCode);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0); 
-            
-            const relevantTypes = ['Medical', 'License'];
-            
-            records.forEach(r => {
-                if (relevantTypes.includes(r.type)) {
-                    const expiry = new Date(r.expiryDate);
-                    if (expiry < today) {
-                        newWarnings.push(`Expired Document: ${r.type} expired on ${r.expiryDate}`);
-                    }
-                }
-            });
-        } catch (e) {
-            console.error("Validation error", e);
-        }
-    }
-    setWarnings(newWarnings);
-  };
-
   const handlePicChange = (crewCode: string) => {
       setFormData(prev => ({ ...prev, pic: crewCode }));
+      // Trigger validation
       validatePilot(crewCode, formData.date || '', formData.flightTime || 0);
   };
 
@@ -220,8 +148,10 @@ export const FlightModal: React.FC<FlightModalProps> = ({
     if (!etd) return '';
     const [h, m] = etd.split(':').map(Number);
     const totalMinutes = (h * 60) + m + (durationHrs * 60) + turnMin;
+    
     const newH = Math.floor(totalMinutes / 60) % 24;
     const newM = Math.floor(totalMinutes % 60);
+    
     return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
   };
 
@@ -230,6 +160,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
     setLoading(true);
     try {
       const selectedAircraft = fleet.find(f => f.registration === formData.aircraftRegistration);
+      
       const { id, ...cleanData } = formData as any;
       
       const outboundFlight: Omit<Flight, 'id'> = {
@@ -254,6 +185,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         };
         await onSave(returnFlight);
       }
+
       onClose();
     } catch (error) {
       console.error("Error saving flight:", error);
@@ -287,7 +219,11 @@ export const FlightModal: React.FC<FlightModalProps> = ({
               {editingFlight ? `Update details for flight ${editingFlight.flightNumber}` : 'Enter the details for the new operation'}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all">
+          <button 
+            type="button"
+            onClick={onClose} 
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all"
+          >
             <X size={24} />
           </button>
         </div>
@@ -295,7 +231,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         <div className="p-8 overflow-y-auto custom-scrollbar bg-white">
           <form id="flight-form" onSubmit={handleSubmit} className="space-y-8">
             
-            {/* Section: Operational Info */}
+            {/* Operational Info */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
               <div>
                 <label className={labelClass}>Date</label>
@@ -316,12 +252,23 @@ export const FlightModal: React.FC<FlightModalProps> = ({
               </div>
               <div>
                 <label className={labelClass}>Flight No.</label>
-                <input type="text" required placeholder="e.g. TGY1234" value={formData.flightNumber} onChange={e => setFormData(prev => ({ ...prev, flightNumber: e.target.value }))} className={`${inputClass} !pl-4 font-bold uppercase tracking-wide`} />
+                <input 
+                  type="text"
+                  required
+                  placeholder="e.g. TGY1234"
+                  value={formData.flightNumber}
+                  onChange={e => setFormData(prev => ({ ...prev, flightNumber: e.target.value }))}
+                  className={`${inputClass} !pl-4 font-bold uppercase tracking-wide`}
+                />
               </div>
               <div>
                 <label className={labelClass}>Status</label>
                 <div className={inputWrapperClass}>
-                  <select value={formData.status} onChange={e => setFormData(prev => ({ ...prev, status: e.target.value as any }))} className={selectClass}>
+                  <select 
+                    value={formData.status}
+                    onChange={e => setFormData(prev => ({ ...prev, status: e.target.value as any }))}
+                    className={selectClass}
+                  >
                     <option value="Scheduled">Scheduled</option>
                     <option value="Delayed">Delayed</option>
                     <option value="Completed">Completed</option>
@@ -332,85 +279,92 @@ export const FlightModal: React.FC<FlightModalProps> = ({
               </div>
             </div>
 
-            {/* Section: Route & Aircraft */}
+            {/* Route & Aircraft */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-              
-              {/* NEW: SMART ROUTE SELECTION */}
               <div className="sm:col-span-1">
                 <label className={labelClass}>Route</label>
-                {features.enableRouteManagement ? (
-                  <div className="flex gap-1">
-                    <div className="relative flex-1">
-                      <input 
-                        list="loc-options"
-                        placeholder="FROM"
-                        className={`${inputClass} !pl-4 uppercase font-bold text-center`}
-                        value={fromLoc}
-                        onChange={e => setFromLoc(e.target.value.toUpperCase())}
-                      />
-                    </div>
-                    <div className="flex items-center text-slate-400">-</div>
-                    <div className="relative flex-1">
-                      <input 
-                        list="loc-options"
-                        placeholder="TO"
-                        className={`${inputClass} !pl-4 uppercase font-bold text-center`}
-                        value={toLoc}
-                        onChange={e => setToLoc(e.target.value.toUpperCase())}
-                      />
-                    </div>
-                    <datalist id="loc-options">
-                      {locations.map(l => <option key={l.id} value={l.code}>{l.name}</option>)}
-                    </datalist>
-                  </div>
-                ) : (
-                  <div className={inputWrapperClass}>
-                    <MapPin className={iconClass} size={18} />
-                    <input 
-                      type="text"
-                      required
-                      placeholder="OGL-KAI"
-                      value={formData.route}
-                      onChange={e => setFormData(prev => ({ ...prev, route: e.target.value.toUpperCase() }))}
-                      className={`${inputClass} font-mono uppercase`}
-                    />
-                  </div>
-                )}
-                {features.enableRouteManagement && routeError && (
-                   <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertTriangle size={10} /> {routeError}</p>
-                )}
+                <div className={inputWrapperClass}>
+                  <MapPin className={iconClass} size={18} />
+                  <input 
+                    type="text"
+                    required
+                    placeholder="OGL-KAI"
+                    value={formData.route}
+                    onChange={e => setFormData(prev => ({ ...prev, route: e.target.value.toUpperCase() }))}
+                    className={`${inputClass} font-mono uppercase`}
+                  />
+                </div>
               </div>
-
               <div className="sm:col-span-2">
                 <label className={labelClass}>Aircraft Assignment</label>
                 <div className={inputWrapperClass}>
-                    <select value={formData.aircraftRegistration} onChange={e => setFormData(prev => ({ ...prev, aircraftRegistration: e.target.value }))} className={selectClass}>
+                    <select 
+                        value={formData.aircraftRegistration}
+                        onChange={e => setFormData(prev => ({ ...prev, aircraftRegistration: e.target.value }))}
+                        className={selectClass}
+                    >
                         <option value="">Select Aircraft from Fleet...</option>
-                        <optgroup label="1900D">{fleet.filter(f => f.type === '1900D').map(f => <option key={f._docId} value={f.registration}>{f.registration} (1900D) - {f.status}</option>)}</optgroup>
-                        <optgroup label="C208EX">{fleet.filter(f => f.type === 'C208EX').map(f => <option key={f._docId} value={f.registration}>{f.registration} (C208EX) - {f.status}</option>)}</optgroup>
-                        <optgroup label="C208B">{fleet.filter(f => f.type === 'C208B').map(f => <option key={f._docId} value={f.registration}>{f.registration} (C208B) - {f.status}</option>)}</optgroup>
+                        <optgroup label="1900D">
+                        {fleet.filter(f => f.type === '1900D').map(f => (
+                            <option key={f._docId} value={f.registration}>{f.registration} (1900D) - {f.status}</option>
+                        ))}
+                        </optgroup>
+                        <optgroup label="C208EX">
+                        {fleet.filter(f => f.type === 'C208EX').map(f => (
+                            <option key={f._docId} value={f.registration}>{f.registration} (C208EX) - {f.status}</option>
+                        ))}
+                        </optgroup>
+                        <optgroup label="C208B">
+                        {fleet.filter(f => f.type === 'C208B').map(f => (
+                            <option key={f._docId} value={f.registration}>{f.registration} (C208B) - {f.status}</option>
+                        ))}
+                        </optgroup>
                     </select>
                     <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                 </div>
               </div>
             </div>
 
-            {/* Section: Timing */}
+            {/* Timing */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
               <div>
                 <label className={labelClass}>ETD (Local)</label>
                 <div className={inputWrapperClass}>
                   <Clock className={iconClass} size={18} />
-                  <input type="time" required value={formData.etd} onChange={e => setFormData(prev => ({ ...prev, etd: e.target.value }))} className={inputClass} />
+                  <input 
+                    type="time"
+                    required
+                    value={formData.etd}
+                    onChange={e => setFormData(prev => ({ ...prev, etd: e.target.value }))}
+                    className={inputClass}
+                  />
                 </div>
               </div>
               <div>
                 <label className={labelClass}>Flight Time (Hrs)</label>
-                <input type="number" step="0.1" min="0" value={formData.flightTime || ''} onChange={e => { const t = parseFloat(e.target.value); setFormData(prev => ({ ...prev, flightTime: t })); if(formData.pic) validatePilot(formData.pic, formData.date || '', t); }} className={`${inputClass} !pl-4`} placeholder="e.g. 1.5" />
+                <input 
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={formData.flightTime || ''}
+                    onChange={e => {
+                        const time = parseFloat(e.target.value);
+                        setFormData(prev => ({ ...prev, flightTime: time }));
+                        if(formData.pic) validatePilot(formData.pic, formData.date || '', time);
+                    }}
+                    className={`${inputClass} !pl-4`}
+                    placeholder="e.g. 1.5"
+                />
               </div>
               <div>
                 <label className={labelClass}>C/Time (H:MM)</label>
-                <input type="text" value={formData.commercialTime || ''} onChange={e => setFormData(prev => ({ ...prev, commercialTime: e.target.value }))} className={`${inputClass} !pl-4`} placeholder="e.g. 1:45" />
+                <input 
+                    type="text"
+                    value={formData.commercialTime || ''}
+                    onChange={e => setFormData(prev => ({ ...prev, commercialTime: e.target.value }))}
+                    className={`${inputClass} !pl-4`}
+                    placeholder="e.g. 1:45"
+                />
               </div>
             </div>
 
@@ -428,7 +382,11 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                             </div>
                         </div>
                         <div className="flex items-center">
-                           <button type="button" onClick={() => setCreateReturn(!createReturn)} className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${createReturn ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                           <button
+                             type="button"
+                             onClick={() => setCreateReturn(!createReturn)}
+                             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${createReturn ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                           >
                                 <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${createReturn ? 'translate-x-5' : 'translate-x-0'}`} />
                            </button>
                         </div>
@@ -441,7 +399,14 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                                     <label className={labelClass}>Turnaround (Mins)</label>
                                     <div className="relative">
                                         <Timer className={iconClass} size={18} />
-                                        <input type="number" value={turnaroundMin} onChange={(e) => setTurnaroundMin(Number(e.target.value))} className={inputClass} min="15" step="5" />
+                                        <input 
+                                            type="number"
+                                            value={turnaroundMin}
+                                            onChange={(e) => setTurnaroundMin(Number(e.target.value))}
+                                            className={inputClass}
+                                            min="15"
+                                            step="5"
+                                        />
                                     </div>
                                 </div>
                                 <div>
@@ -462,7 +427,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                 </div>
             )}
 
-            {/* Section: Crew */}
+            {/* Crew Assignment */}
             <div className="p-5 bg-slate-50 rounded-xl border border-slate-100">
                 <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
                     <User size={16} className="text-blue-500"/> Crew Assignment
@@ -486,9 +451,15 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                     <div>
                         <label className={labelClass}>Pilot in Command (PIC)</label>
                         <div className={inputWrapperClass}>
-                            <select value={formData.pic} onChange={e => handlePicChange(e.target.value)} className={selectClass}>
+                            <select 
+                                value={formData.pic}
+                                onChange={e => handlePicChange(e.target.value)}
+                                className={`${selectClass} ${warnings.length > 0 ? 'border-red-300 ring-2 ring-red-100' : ''}`}
+                            >
                                 <option value="">Select Pilot...</option>
-                                {pilots.map(p => <option key={p._docId} value={p.code}>{p.code} - {p.name}</option>)}
+                                {pilots.map(p => (
+                                    <option key={p._docId} value={p.code}>{p.code} - {p.name}</option>
+                                ))}
                             </select>
                             <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                         </div>
@@ -496,9 +467,15 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                     <div>
                         <label className={labelClass}>Second in Command (SIC)</label>
                         <div className={inputWrapperClass}>
-                            <select value={formData.sic} onChange={e => setFormData(prev => ({ ...prev, sic: e.target.value }))} className={selectClass}>
+                            <select 
+                                value={formData.sic}
+                                onChange={e => setFormData(prev => ({ ...prev, sic: e.target.value }))}
+                                className={selectClass}
+                            >
                                 <option value="">None</option>
-                                {pilots.map(p => <option key={p._docId} value={p.code}>{p.code} - {p.name}</option>)}
+                                {pilots.map(p => (
+                                    <option key={p._docId} value={p.code}>{p.code} - {p.name}</option>
+                                ))}
                             </select>
                             <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                         </div>
@@ -506,14 +483,20 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                 </div>
             </div>
 
-            {/* Section: Additional Info */}
+            {/* Additional Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div>
                     <label className={labelClass}>Customer / Client</label>
                     <div className={inputWrapperClass}>
-                        <select value={formData.customer} onChange={(e) => handleCustomerSelect(e.target.value)} className={selectClass}>
+                        <select
+                            value={formData.customer}
+                            onChange={(e) => handleCustomerSelect(e.target.value)}
+                            className={selectClass}
+                        >
                             <option value="">Select Customer...</option>
-                            {customers.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                            {customers.map(c => (
+                                <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
                         </select>
                         <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                     </div>
@@ -522,24 +505,46 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                     <label className={labelClass}>Customer ID</label>
                     <div className={inputWrapperClass}>
                         <Hash className={iconClass} size={18} />
-                        <input type="text" value={formData.customerId} onChange={e => setFormData(prev => ({ ...prev, customerId: e.target.value }))} className={inputClass} placeholder="ID" />
+                        <input 
+                            type="text"
+                            value={formData.customerId}
+                            onChange={e => setFormData(prev => ({ ...prev, customerId: e.target.value }))}
+                            className={inputClass}
+                            placeholder="ID"
+                        />
                     </div>
                 </div>
             </div>
             <div>
                 <label className={labelClass}>Internal Notes</label>
-                <textarea rows={3} value={formData.notes} onChange={e => setFormData(prev => ({ ...prev, notes: e.target.value }))} className="w-full px-4 py-3 bg-white text-slate-900 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 shadow-sm" placeholder="Additional operational details..." />
+                <textarea 
+                  rows={3}
+                  value={formData.notes}
+                  onChange={e => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                  className="w-full px-4 py-3 bg-white text-slate-900 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 shadow-sm"
+                  placeholder="Additional operational details..."
+                />
             </div>
 
           </form>
         </div>
 
-        {/* Footer */}
         <div className="px-8 py-5 bg-slate-50 border-t border-slate-200 flex justify-between gap-4 sticky bottom-0 z-10">
           <div></div>
           <div className="flex gap-3">
-            <button type="button" onClick={onClose} className="px-6 py-2.5 text-sm font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 rounded-xl transition-all shadow-sm">Cancel</button>
-            <button type="submit" form="flight-form" disabled={loading} className="px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95">
+            <button 
+                type="button"
+                onClick={onClose}
+                className="px-6 py-2.5 text-sm font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 rounded-xl transition-all shadow-sm"
+            >
+                Cancel
+            </button>
+            <button 
+                type="submit"
+                form="flight-form"
+                disabled={loading}
+                className="px-8 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95"
+            >
                 {loading ? 'Saving...' : <><Save size={18} /> {createReturn ? 'Save Round Trip' : 'Save Flight'}</>}
             </button>
           </div>
