@@ -113,7 +113,30 @@ export const createUserProfile = async (profile: UserProfile) => {
     }
 };
 
-// --- Organization / SaaS Logic (THE MISSING PIECE) ---
+// NEW: Fetch all users for an organization
+export const fetchOrganizationUsers = async (orgId: string): Promise<UserProfile[]> => {
+  if (!auth.currentUser) return [];
+  try {
+    const q = query(collection(db, "users"), where("orgId", "==", orgId));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => doc.data() as UserProfile);
+  } catch (e) {
+    console.error("Error fetching users:", e);
+    return [];
+  }
+};
+
+// NEW: Delete a user
+export const deleteUserProfile = async (email: string) => {
+    try {
+        await deleteDoc(doc(db, "users", email));
+    } catch (e) {
+        console.error("Error deleting user:", e);
+        throw e;
+    }
+};
+
+// --- Organization / SaaS Logic ---
 
 export const subscribeToOrganization = (orgId: string, callback: (org: Organization | null) => void) => {
   if (!auth.currentUser || !orgId) return () => {};
@@ -124,7 +147,6 @@ export const subscribeToOrganization = (orgId: string, callback: (org: Organizat
     if (docSnap.exists()) {
       callback({ id: docSnap.id, ...(docSnap.data() as any) } as Organization);
     } else {
-      // If org doesn't exist, create default for TGA
       seedOrganization(orgId);
     }
   }, (error) => console.error("Org snapshot error:", error));
@@ -133,7 +155,6 @@ export const subscribeToOrganization = (orgId: string, callback: (org: Organizat
 export const updateOrganizationLicense = async (orgId: string, modules: SystemSettings) => {
     try {
         const docRef = doc(db, "organizations", orgId);
-        // We merge into the license.modules path
         await setDoc(docRef, { license: { modules } }, { merge: true });
     } catch(e) {
         console.error("Error updating license:", e);
@@ -547,5 +568,61 @@ export const deleteTrainingEvent = async (id: string) => {
   } catch (e) {
     console.error("Error deleting training event", e);
     throw e;
+  }
+};
+
+// --- System Settings (Feature Flags) ---
+
+export const subscribeToSystemSettings = (callback: (settings: SystemSettings) => void) => {
+  if (!auth.currentUser) return () => {};
+  
+  const docRef = doc(db, "system_settings", "config");
+  
+  return onSnapshot(docRef, (docSnap) => {
+    if (docSnap.exists()) {
+      callback(docSnap.data() as SystemSettings);
+    } else {
+      initializeSystemSettings();
+    }
+  }, (error) => {
+      console.error("System settings error", error);
+  });
+};
+
+export const updateSystemSettings = async (settings: Partial<SystemSettings>) => {
+    try {
+        const docRef = doc(db, "system_settings", "config");
+        await updateDoc(docRef, sanitizeData(settings));
+    } catch (e) {
+        console.error("Error updating system settings", e);
+        throw e;
+    }
+};
+
+export const initializeSystemSettings = async () => {
+  const defaultSettings: SystemSettings = {
+    enableFleetManagement: true,
+    enableCrewManagement: true,
+    enableFlightPlanning: true,
+    enableDispatch: true,
+    enableVoyageReports: true,
+    enableTrainingManagement: true,
+    enableReports: true,
+    enableFleetChecks: true,
+    enableCrewFDP: true,
+    enableCrewStrips: true,
+    enableRouteManagement: true,
+    enableCustomerDatabase: true,
+    systemVersion: 'V11282025|1030'
+  };
+  
+  try {
+     const docRef = doc(db, "system_settings", "config");
+     const snap = await getDoc(docRef);
+     if (!snap.exists()) {
+        await setDoc(docRef, defaultSettings);
+     }
+  } catch (e) {
+    console.error("Error init settings:", e);
   }
 };

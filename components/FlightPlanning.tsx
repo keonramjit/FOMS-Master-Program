@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition } from '../types';
 import { CalendarWidget } from './CalendarWidget';
@@ -54,6 +55,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
   const handleExportPDF = async () => {
     try {
+      // Lazy load the PDF service
       const { generateDailySchedulePDF } = await import('../services/pdfService');
       generateDailySchedulePDF(currentDate, localFlights);
     } catch (e) {
