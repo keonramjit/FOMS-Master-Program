@@ -48,7 +48,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // NEW: Validation Logic (FDP & Training)
+  // Validation Logic (FDP & Training) - WE KEEP THIS
   const validatePilot = async (crewCode: string, date: string, flightDuration: number) => {
       const newWarnings: string[] = [];
       if (!crewCode || !date) {
@@ -115,7 +115,6 @@ export const FlightModal: React.FC<FlightModalProps> = ({
 
   const handlePicChange = (crewCode: string) => {
       setFormData(prev => ({ ...prev, pic: crewCode }));
-      // Trigger validation
       validatePilot(crewCode, formData.date || '', formData.flightTime || 0);
   };
 

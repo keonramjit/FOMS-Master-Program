@@ -43,14 +43,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
   const isSynced = !hasUnsavedChanges && removedFlightIds.length === 0;
 
-  // Define sync button properties based on state
-  const syncProps = {
-    icon: isSyncing ? <RefreshCw size={18} className="animate-spin" /> : (isSynced ? <CheckCircle2 size={18} /> : <Save size={18} />),
-    text: isSyncing ? 'Syncing...' : (isSynced ? 'Synced' : 'Sync Changes'),
-    color: isSynced ? 'bg-emerald-500 border-emerald-600 hover:bg-emerald-600' : 'bg-blue-600 border-blue-700 hover:bg-blue-700',
-    tooltip: isSynced ? 'All changes saved to cloud' : 'Push local changes to cloud'
-  };
-
   const handleSyncReq = () => {
     if (isSynced) return;
     setShowConfirmSync(true);

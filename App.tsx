@@ -276,17 +276,9 @@ const App: React.FC = () => {
                 ) : currentView === 'fleet' && features.enableFleetManagement ? (
                     <FleetManager fleet={fleet} flights={flights} onAdd={addAircraft} onUpdate={updateAircraft} features={features} />
                 ) : currentView === 'planning' && features.enableFlightPlanning ? (
-                    <FlightPlanning currentDate={currentDate} onDateChange={setCurrentDate} flights={flights} fleet={fleet} crew={crewRoster} routes={routes} locations={locations} customers={customers} onAddFlight={addFlight} onUpdateFlight={updateFlight} onDeleteFlight={deleteFlight} />
+                    <FlightPlanning currentDate={currentDate} onDateChange={setCurrentDate} flights={flights} fleet={fleet} crew={crewRoster} routes={routes} customers={customers} onAddFlight={addFlight} onUpdateFlight={updateFlight} onDeleteFlight={deleteFlight} />
                 ) : currentView === 'dispatch' ? (
-                    <DispatchManager 
-                        flights={flights} 
-                        fleet={fleet} 
-                        crew={crewRoster} 
-                        currentDate={currentDate} 
-                        isEnabled={features.enableDispatch} 
-                        onDateChange={setCurrentDate}
-                        features={features} // Added prop here
-                    />
+                    <DispatchManager flights={flights} fleet={fleet} crew={crewRoster} currentDate={currentDate} isEnabled={features.enableDispatch} onDateChange={setCurrentDate} />
                 ) : currentView === 'voyage' ? (
                     <VoyageReportManager flights={flights} crew={crewRoster} currentDate={currentDate} isEnabled={features.enableVoyageReports} onDateChange={setCurrentDate} />
                 ) : currentView === 'training' ? (
