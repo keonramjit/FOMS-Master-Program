@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Flight, Aircraft, CrewMember, CustomerDefinition, SystemSettings, TrainingRecord } from '../types';
-import { X, Save, Plane, Calendar, Clock, User, MapPin, ChevronDown, ArrowRightLeft, Timer, Hash, AlertTriangle } from 'lucide-react';
+import { Flight, Aircraft, CrewMember, CustomerDefinition, SystemSettings } from '../types';
+import { X, Save, Plane, Calendar, Clock, User, MapPin, ChevronDown, ArrowRightLeft, Timer, Hash, AlertTriangle, AlertCircle } from 'lucide-react';
 import { fetchCrewTrainingRecords } from '../services/firebase';
+import { z } from 'zod'; // Import Zod
 
 interface FlightModalProps {
   isOpen: boolean;
@@ -15,40 +16,50 @@ interface FlightModalProps {
   features: SystemSettings;
 }
 
+// --- ZOD VALIDATION SCHEMA ---
+// This defines the rules for a "Perfect Flight Record"
+const flightFormSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format"),
+  flightNumber: z.string().regex(/^TGY\d{3,4}$/, "Flight # must be format TGY1234"),
+  route: z.string().min(3, "Route code is required (e.g. OGL-KAI)"),
+  aircraftRegistration: z.string().regex(/^8R-[A-Z]{3}$/, "Registration must be format 8R-XXX"),
+  aircraftType: z.enum(['C208B', 'C208EX', '1900D']),
+  etd: z.string().regex(/^\d{2}:\d{2}$/, "Time must be HH:MM"),
+  flightTime: z.number().min(0.1, "Flight time must be positive").max(10, "Flight time exceeds aircraft endurance"),
+  commercialTime: z.string().optional(),
+  pic: z.string().min(1, "Pilot in Command is required"),
+  sic: z.string().optional(),
+  customer: z.string().min(1, "Customer is required"),
+  customerId: z.string().optional(),
+  status: z.enum(['Scheduled', 'Delayed', 'Completed', 'Cancelled', 'Outbound', 'Inbound', 'On Ground']),
+  notes: z.string().optional()
+});
+
 export const FlightModal: React.FC<FlightModalProps> = ({ 
   isOpen, 
   onClose, 
   onSave, 
   editingFlight, 
   fleet, 
-  crew,
+  crew, 
   customers = [],
   flights,
   features
 }) => {
   const [formData, setFormData] = useState<Partial<Flight>>({
-    flightNumber: '',
-    date: '', 
-    route: '',
-    aircraftRegistration: '',
-    aircraftType: 'C208B',
-    etd: '',
-    flightTime: 0,
-    commercialTime: '',
-    pic: '',
-    sic: '',
-    customer: '',
-    customerId: '',
-    status: 'Scheduled',
-    notes: ''
+    flightNumber: '', date: '', route: '', aircraftRegistration: '', aircraftType: 'C208B', etd: '', flightTime: 0, commercialTime: '', pic: '', sic: '', customer: '', customerId: '', status: 'Scheduled', notes: ''
   });
 
   const [createReturn, setCreateReturn] = useState(false);
   const [turnaroundMin, setTurnaroundMin] = useState(30);
-  const [warnings, setWarnings] = useState<string[]>([]);
+  
+  // Safety & Validation State
+  const [warnings, setWarnings] = useState<string[]>([]); // Pilot Safety Warnings (Smart Dispatch)
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({}); // Data Format Errors (Zod)
+  
   const [loading, setLoading] = useState(false);
 
-  // Validation Logic (FDP & Training) - WE KEEP THIS
+  // --- EXISTING LOGIC (Smart Dispatch) ---
   const validatePilot = async (crewCode: string, date: string, flightDuration: number) => {
       const newWarnings: string[] = [];
       if (!crewCode || !date) {
@@ -63,7 +74,6 @@ export const FlightModal: React.FC<FlightModalProps> = ({
               (f.pic === crewCode || f.sic === crewCode) && 
               (editingFlight ? f.id !== editingFlight.id : true)
           );
-          
           const previousHours = pilotDailyFlights.reduce((acc, f) => acc + (f.flightTime || 0), 0);
           const potentialTotal = previousHours + flightDuration;
 
@@ -80,12 +90,11 @@ export const FlightModal: React.FC<FlightModalProps> = ({
               today.setHours(0, 0, 0, 0); 
               
               const relevantTypes = ['Medical', 'License'];
-              
               records.forEach(r => {
                   if (relevantTypes.includes(r.type)) {
                       const expiry = new Date(r.expiryDate);
                       if (expiry < today) {
-                          newWarnings.push(`Expired Document: ${r.type} expired on ${r.expiryDate}`);
+                          newWarnings.push(`EXPIRED: ${doc.type} (${doc.expiryDate})`);
                       }
                   }
               });
@@ -93,7 +102,6 @@ export const FlightModal: React.FC<FlightModalProps> = ({
               console.error("Validation error", e);
           }
       }
-
       setWarnings(newWarnings);
   };
 
@@ -111,6 +119,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         setCreateReturn(false);
         setWarnings([]);
     }
+    setValidationErrors({}); // Clear errors on open
   }, [editingFlight, isOpen]);
 
   const handlePicChange = (crewCode: string) => {
@@ -127,6 +136,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
       }));
   };
 
+  // --- RETURN FLIGHT HELPERS ---
   const generateReturnRoute = (route: string) => {
     if (!route.includes('-')) return route;
     const [a, b] = route.split('-');
@@ -147,25 +157,39 @@ export const FlightModal: React.FC<FlightModalProps> = ({
     if (!etd) return '';
     const [h, m] = etd.split(':').map(Number);
     const totalMinutes = (h * 60) + m + (durationHrs * 60) + turnMin;
-    
     const newH = Math.floor(totalMinutes / 60) % 24;
     const newM = Math.floor(totalMinutes % 60);
-    
     return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
   };
 
+  // --- SUBMIT HANDLER (Now with Zod Validation) ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // 1. Validate Data Structure
+    const validationResult = flightFormSchema.safeParse(formData);
+
+    if (!validationResult.success) {
+        // Convert Zod errors to a simple object for UI
+        const formattedErrors: Record<string, string> = {};
+        validationResult.error.issues.forEach(issue => {
+            formattedErrors[issue.path[0]] = issue.message;
+        });
+        setValidationErrors(formattedErrors);
+        return; // STOP HERE if invalid
+    }
+
+    // 2. Proceed if Valid
+    setValidationErrors({});
     setLoading(true);
+    
     try {
       const selectedAircraft = fleet.find(f => f.registration === formData.aircraftRegistration);
-      
       const { id, ...cleanData } = formData as any;
       
       const outboundFlight: Omit<Flight, 'id'> = {
         ...cleanData,
         aircraftType: selectedAircraft ? selectedAircraft.type : formData.aircraftType,
-        flightTime: isNaN(Number(formData.flightTime)) ? 0 : Number(formData.flightTime),
         flightNumber: formData.flightNumber?.toUpperCase() || 'TBA',
         route: formData.route?.toUpperCase() || ''
       };
@@ -184,7 +208,6 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         };
         await onSave(returnFlight);
       }
-
       onClose();
     } catch (error) {
       console.error("Error saving flight:", error);
@@ -198,6 +221,8 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   const inputWrapperClass = "relative";
   const iconClass = "absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none";
   const inputClass = "w-full pl-11 pr-4 py-3 bg-white text-slate-900 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400 shadow-sm";
+  // Helper to conditionally add error border
+  const getInputClass = (field: string) => `${inputClass} ${validationErrors[field] ? 'border-red-500 ring-1 ring-red-200' : ''}`;
   const selectClass = `${inputClass} appearance-none cursor-pointer`;
 
   if (!isOpen) return null;
@@ -218,11 +243,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
               {editingFlight ? `Update details for flight ${editingFlight.flightNumber}` : 'Enter the details for the new operation'}
             </p>
           </div>
-          <button 
-            type="button"
-            onClick={onClose} 
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all"
-          >
+          <button type="button" onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all">
             <X size={24} />
           </button>
         </div>
@@ -238,27 +259,27 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                   <Calendar className={iconClass} size={18} />
                   <input 
                     type="date"
-                    required
                     value={formData.date}
                     onChange={e => {
                         const newDate = e.target.value;
                         setFormData(prev => ({ ...prev, date: newDate }));
                         if(formData.pic) validatePilot(formData.pic, newDate, formData.flightTime || 0);
                     }}
-                    className={inputClass}
+                    className={getInputClass('date')}
                   />
                 </div>
+                {validationErrors.date && <p className="text-[10px] text-red-500 font-bold mt-1">{validationErrors.date}</p>}
               </div>
               <div>
                 <label className={labelClass}>Flight No.</label>
                 <input 
                   type="text"
-                  required
                   placeholder="e.g. TGY1234"
                   value={formData.flightNumber}
                   onChange={e => setFormData(prev => ({ ...prev, flightNumber: e.target.value }))}
-                  className={`${inputClass} !pl-4 font-bold uppercase tracking-wide`}
+                  className={`${getInputClass('flightNumber')} !pl-4 font-bold uppercase tracking-wide`}
                 />
+                {validationErrors.flightNumber && <p className="text-[10px] text-red-500 font-bold mt-1">{validationErrors.flightNumber}</p>}
               </div>
               <div>
                 <label className={labelClass}>Status</label>
@@ -286,13 +307,13 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                   <MapPin className={iconClass} size={18} />
                   <input 
                     type="text"
-                    required
                     placeholder="OGL-KAI"
                     value={formData.route}
                     onChange={e => setFormData(prev => ({ ...prev, route: e.target.value.toUpperCase() }))}
-                    className={`${inputClass} font-mono uppercase`}
+                    className={`${getInputClass('route')} font-mono uppercase`}
                   />
                 </div>
+                {validationErrors.route && <p className="text-[10px] text-red-500 font-bold mt-1">{validationErrors.route}</p>}
               </div>
               <div className="sm:col-span-2">
                 <label className={labelClass}>Aircraft Assignment</label>
@@ -300,7 +321,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                     <select 
                         value={formData.aircraftRegistration}
                         onChange={e => setFormData(prev => ({ ...prev, aircraftRegistration: e.target.value }))}
-                        className={selectClass}
+                        className={getInputClass('aircraftRegistration')}
                     >
                         <option value="">Select Aircraft from Fleet...</option>
                         <optgroup label="1900D">
@@ -321,6 +342,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                     </select>
                     <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                 </div>
+                {validationErrors.aircraftRegistration && <p className="text-[10px] text-red-500 font-bold mt-1">{validationErrors.aircraftRegistration}</p>}
               </div>
             </div>
 
@@ -332,12 +354,12 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                   <Clock className={iconClass} size={18} />
                   <input 
                     type="time"
-                    required
                     value={formData.etd}
                     onChange={e => setFormData(prev => ({ ...prev, etd: e.target.value }))}
-                    className={inputClass}
+                    className={getInputClass('etd')}
                   />
                 </div>
+                {validationErrors.etd && <p className="text-[10px] text-red-500 font-bold mt-1">{validationErrors.etd}</p>}
               </div>
               <div>
                 <label className={labelClass}>Flight Time (Hrs)</label>
@@ -351,9 +373,10 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                         setFormData(prev => ({ ...prev, flightTime: time }));
                         if(formData.pic) validatePilot(formData.pic, formData.date || '', time);
                     }}
-                    className={`${inputClass} !pl-4`}
+                    className={`${getInputClass('flightTime')} !pl-4`}
                     placeholder="e.g. 1.5"
                 />
+                {validationErrors.flightTime && <p className="text-[10px] text-red-500 font-bold mt-1">{validationErrors.flightTime}</p>}
               </div>
               <div>
                 <label className={labelClass}>C/Time (H:MM)</label>
@@ -381,11 +404,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                             </div>
                         </div>
                         <div className="flex items-center">
-                           <button
-                             type="button"
-                             onClick={() => setCreateReturn(!createReturn)}
-                             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${createReturn ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                           >
+                           <button type="button" onClick={() => setCreateReturn(!createReturn)} className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${createReturn ? 'bg-indigo-600' : 'bg-slate-300'}`}>
                                 <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${createReturn ? 'translate-x-5' : 'translate-x-0'}`} />
                            </button>
                         </div>
@@ -398,14 +417,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                                     <label className={labelClass}>Turnaround (Mins)</label>
                                     <div className="relative">
                                         <Timer className={iconClass} size={18} />
-                                        <input 
-                                            type="number"
-                                            value={turnaroundMin}
-                                            onChange={(e) => setTurnaroundMin(Number(e.target.value))}
-                                            className={inputClass}
-                                            min="15"
-                                            step="5"
-                                        />
+                                        <input type="number" value={turnaroundMin} onChange={(e) => setTurnaroundMin(Number(e.target.value))} className={inputClass} min="15" step="5" />
                                     </div>
                                 </div>
                                 <div>
@@ -453,7 +465,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                             <select 
                                 value={formData.pic}
                                 onChange={e => handlePicChange(e.target.value)}
-                                className={`${selectClass} ${warnings.length > 0 ? 'border-red-300 ring-2 ring-red-100' : ''}`}
+                                className={`${getInputClass('pic')} ${warnings.length > 0 ? 'border-red-300 ring-2 ring-red-100' : ''}`}
                             >
                                 <option value="">Select Pilot...</option>
                                 {pilots.map(p => (
@@ -462,6 +474,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                             </select>
                             <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                         </div>
+                        {validationErrors.pic && <p className="text-[10px] text-red-500 font-bold mt-1">{validationErrors.pic}</p>}
                     </div>
                     <div>
                         <label className={labelClass}>Second in Command (SIC)</label>
@@ -490,7 +503,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                         <select
                             value={formData.customer}
                             onChange={(e) => handleCustomerSelect(e.target.value)}
-                            className={selectClass}
+                            className={getInputClass('customer')}
                         >
                             <option value="">Select Customer...</option>
                             {customers.map(c => (
@@ -499,6 +512,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                         </select>
                         <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                     </div>
+                    {validationErrors.customer && <p className="text-[10px] text-red-500 font-bold mt-1">{validationErrors.customer}</p>}
                 </div>
                 <div>
                     <label className={labelClass}>Customer ID</label>
@@ -529,7 +543,14 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         </div>
 
         <div className="px-8 py-5 bg-slate-50 border-t border-slate-200 flex justify-between gap-4 sticky bottom-0 z-10">
-          <div></div>
+          <div>
+             {Object.keys(validationErrors).length > 0 && (
+                 <div className="flex items-center gap-2 text-red-600 bg-red-50 px-3 py-1.5 rounded-lg">
+                     <AlertCircle size={16} />
+                     <span className="text-xs font-bold">Please fix errors before saving.</span>
+                 </div>
+             )}
+          </div>
           <div className="flex gap-3">
             <button 
                 type="button"
