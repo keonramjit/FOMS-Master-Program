@@ -197,6 +197,13 @@ export interface OpsPlanData {
     weatherAlt?: string;
     additionalWx?: string;
     remarks?: string;
+    
+    // Ops FPL specific fields
+    arrivalTime?: string;
+    depAerodrome?: string;
+    destAerodrome?: string;
+    altAerodrome1?: string;
+    altAerodrome2?: string;
 }
 
 export interface NotocItem {

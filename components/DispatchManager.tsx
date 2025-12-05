@@ -70,7 +70,12 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
         weatherDest: '',
         weatherAlt: '',
         additionalWx: '',
-        remarks: ''
+        remarks: '',
+        depAerodrome: '',
+        destAerodrome: '',
+        arrivalTime: '',
+        altAerodrome1: '',
+        altAerodrome2: ''
     },
     wnb: INITIAL_WNB,
     notoc: {
@@ -115,6 +120,8 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
         const aircraft = fleet.find(a => a.registration === selectedFlight.aircraftRegistration);
         
         const unsubscribe = subscribeToDispatch(selectedFlight.id, (data) => {
+            const routeParts = selectedFlight.route.includes('-') ? selectedFlight.route.split('-') : [selectedFlight.route, ''];
+            
             if (data) {
                 setDispatchData({
                     ...data,
@@ -125,6 +132,11 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                         weatherAlt: '',
                         additionalWx: '',
                         remarks: '',
+                        depAerodrome: routeParts[0] || '',
+                        destAerodrome: routeParts[1] || '',
+                        arrivalTime: '',
+                        altAerodrome1: '',
+                        altAerodrome2: '',
                         ...(data.opsPlan || {})
                     },
                     wnb: { ...INITIAL_WNB, ...(data.wnb || {}) },
@@ -152,7 +164,12 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                         weatherDest: '',
                         weatherAlt: '',
                         additionalWx: '',
-                        remarks: ''
+                        remarks: '',
+                        depAerodrome: routeParts[0] || '',
+                        destAerodrome: routeParts[1] || '',
+                        arrivalTime: '',
+                        altAerodrome1: '',
+                        altAerodrome2: ''
                     },
                     wnb: INITIAL_WNB,
                     notoc: {
@@ -161,7 +178,7 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                     }
                 });
             }
-            const routeParts = selectedFlight.route.includes('-') ? selectedFlight.route.split('-') : [selectedFlight.route, ''];
+            
             setNewPax({
                 lastName: '', firstName: '', isInfant: false,
                 departure: routeParts[0],
@@ -199,6 +216,8 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
   const isDispatchBlocked = fleetSafetyEnabled && isGrounded;
   
   const totalPaxWeight = (dispatchData.passengers || []).reduce((acc, p) => acc + (p.weight || 0) + (p.freeBagWeight || 0) + (p.excessBagWeight || 0), 0);
+  const totalFreeBagWeight = (dispatchData.passengers || []).reduce((acc, p) => acc + (p.freeBagWeight || 0), 0);
+  const totalExcessBagWeight = (dispatchData.passengers || []).reduce((acc, p) => acc + (p.excessBagWeight || 0), 0);
   const totalCargoWeight = (dispatchData.cargoItems || []).reduce((acc, c) => acc + (c.weight || 0), 0);
   const payload = totalPaxWeight + totalCargoWeight;
   const zeroFuelWeight = (dispatchData.basicEmptyWeight || 0) + payload;
@@ -363,7 +382,12 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
               weatherDest: '',
               weatherAlt: '',
               additionalWx: '',
-              remarks: ''
+              remarks: '',
+              depAerodrome: '',
+              destAerodrome: '',
+              arrivalTime: '',
+              altAerodrome1: '',
+              altAerodrome2: ''
           };
           return {
               ...prev,
@@ -442,6 +466,10 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
 
   const inputClass = "w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 block p-2.5 placeholder-slate-400 font-medium transition-all shadow-sm";
   const labelClass = "block mb-1.5 text-xs font-bold text-slate-600 uppercase tracking-tight ml-1";
+  
+  // Compact input for Manifest rows
+  const compactInputClass = "w-full bg-white border border-slate-300 text-slate-900 text-xs rounded h-8 px-2 focus:ring-2 focus:ring-blue-500 outline-none";
+  const compactLabelClass = "block mb-1 text-[10px] font-bold text-slate-500 uppercase tracking-tight";
 
   return (
     <FeatureGate isEnabled={isEnabled}>
@@ -584,14 +612,14 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                             <Tab active={activeTab === 'payload'} onClick={() => setActiveTab('payload')} icon={<Briefcase size={16}/>} label="Payload" />
                             <Tab active={activeTab === 'fuel'} onClick={() => setActiveTab('fuel')} icon={<Fuel size={16}/>} label="Fuel" />
                             <Tab active={activeTab === 'weight'} onClick={() => setActiveTab('weight')} icon={<Scale size={16}/>} label="W&B" warning={isOverweight} />
-                            <Tab active={activeTab === 'opsplan'} onClick={() => setActiveTab('opsplan')} icon={<ScrollText size={16}/>} label="Ops Plan" />
+                            <Tab active={activeTab === 'opsplan'} onClick={() => setActiveTab('opsplan')} icon={<ScrollText size={16}/>} label="Ops FPL" />
                             <Tab active={activeTab === 'notoc'} onClick={() => setActiveTab('notoc')} icon={<Bomb size={16}/>} label="NOTOC" warning={dispatchData.notoc?.dangerousGoods?.length ? true : false} />
                             <Tab active={activeTab === 'weather'} onClick={() => setActiveTab('weather')} icon={<CloudSun size={16}/>} label="Wx" />
                             <Tab active={activeTab === 'release'} onClick={() => setActiveTab('release')} icon={<FileCheck size={16}/>} label="Release" />
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar">
-                            {/* ... (Overview, Payload, Fuel, Weight, OpsPlan tabs omitted for brevity) ... */}
+                            {/* ... (Overview tabs omitted for brevity) ... */}
                             {activeTab === 'overview' && (
                                 <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-2">
                                     <Card title="Flight Context" icon={<Plane className="text-blue-500" />}>
@@ -615,6 +643,7 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
 
                             {activeTab === 'payload' && (
                                 <div className="max-w-[1400px] mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2">
+                                    {/* ... Payload Content ... */}
                                     {/* Passenger Manifest */}
                                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                                         <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
@@ -626,59 +655,59 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                                             </span>
                                         </div>
                                         
-                                        {/* Pax Input */}
-                                        <div className="p-5 border-b border-slate-200 space-y-4 bg-slate-50/50">
-                                            <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                                                <div className="md:col-span-2">
-                                                    <label className={labelClass}>Last Name</label>
-                                                    <input placeholder="Smith" className={inputClass} value={newPax.lastName} onChange={e => setNewPax(p => ({...p, lastName: e.target.value.toUpperCase()}))} />
-                                                </div>
-                                                <div className="md:col-span-2">
-                                                    <label className={labelClass}>First Name</label>
-                                                    <input placeholder="John" className={inputClass} value={newPax.firstName} onChange={e => setNewPax(p => ({...p, firstName: e.target.value.toUpperCase()}))} />
-                                                </div>
-                                                <div>
-                                                    <label className={labelClass}>Weight (Lbs)</label>
-                                                    <input type="number" className={inputClass} value={newPax.weight} onChange={e => setNewPax(p => ({...p, weight: Number(e.target.value)}))} />
-                                                </div>
-                                                <div className="flex items-center pb-2 pl-2">
-                                                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                                                        <input type="checkbox" className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500" checked={newPax.isInfant} onChange={e => setNewPax(p => ({...p, isInfant: e.target.checked}))} />
-                                                        <span className="text-xs font-bold text-slate-700">Infant?</span>
-                                                    </label>
-                                                </div>
+                                        {/* Pax Input - Single Row */}
+                                        <div className="p-3 border-b border-slate-200 bg-slate-50/50 flex items-end gap-2 overflow-x-auto">
+                                            <div className="min-w-[100px] flex-1">
+                                                <label className={compactLabelClass}>Last Name</label>
+                                                <input placeholder="SMITH" className={compactInputClass} value={newPax.lastName} onChange={e => setNewPax(p => ({...p, lastName: e.target.value.toUpperCase()}))} />
                                             </div>
-                                            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 items-end">
-                                                <div>
-                                                    <label className={labelClass}>Seat</label>
-                                                    <input placeholder="1A" className={inputClass} value={newPax.seatNumber} onChange={e => setNewPax(p => ({...p, seatNumber: e.target.value.toUpperCase()}))} />
-                                                </div>
-                                                <div>
-                                                    <label className={labelClass}>Passport #</label>
-                                                    <input placeholder="P123456" className={inputClass} value={newPax.passportNumber} onChange={e => setNewPax(p => ({...p, passportNumber: e.target.value.toUpperCase()}))} />
-                                                </div>
-                                                <div>
-                                                    <label className={labelClass}>Bag Tag</label>
-                                                    <input placeholder="TAG123" className={inputClass} value={newPax.bagTag} onChange={e => setNewPax(p => ({...p, bagTag: e.target.value}))} />
-                                                </div>
-                                                <div>
-                                                    <label className={labelClass}>Ticket #</label>
-                                                    <input placeholder="TK001" className={inputClass} value={newPax.ticketNumber} onChange={e => setNewPax(p => ({...p, ticketNumber: e.target.value}))} />
-                                                </div>
-                                                <div className="md:col-span-2 flex gap-2">
-                                                    {editingPaxId ? (
-                                                        <>
-                                                            <button onClick={handleCancelEdit} className="flex-1 bg-slate-200 text-slate-700 rounded-lg h-[42px] font-bold hover:bg-slate-300 transition-all">Cancel</button>
-                                                            <button onClick={handleSavePax} className="flex-1 bg-blue-600 text-white rounded-lg h-[42px] font-bold hover:bg-blue-700 shadow-md flex items-center justify-center gap-2 transition-all">
-                                                                <Save size={18}/> Update
-                                                            </button>
-                                                        </>
-                                                    ) : (
-                                                        <button onClick={handleSavePax} className="w-full bg-blue-600 text-white rounded-lg h-[42px] font-bold hover:bg-blue-700 shadow-md flex items-center justify-center gap-2 transition-all">
-                                                            <Plus size={18}/> Add Pax
-                                                        </button>
-                                                    )}
-                                                </div>
+                                            <div className="min-w-[100px] flex-1">
+                                                <label className={compactLabelClass}>First Name</label>
+                                                <input placeholder="JOHN" className={compactInputClass} value={newPax.firstName} onChange={e => setNewPax(p => ({...p, firstName: e.target.value.toUpperCase()}))} />
+                                            </div>
+                                            <div className="w-16">
+                                                <label className={compactLabelClass}>Wgt</label>
+                                                <input type="number" className={compactInputClass} value={newPax.weight} onChange={e => setNewPax(p => ({...p, weight: Number(e.target.value)}))} />
+                                            </div>
+                                            <div className="w-16">
+                                                <label className={compactLabelClass}>Free Bag</label>
+                                                <input type="number" className={compactInputClass} value={newPax.freeBagWeight} onChange={e => setNewPax(p => ({...p, freeBagWeight: Number(e.target.value)}))} />
+                                            </div>
+                                            <div className="w-16">
+                                                <label className={compactLabelClass}>Exc. Bag</label>
+                                                <input type="number" className={compactInputClass} value={newPax.excessBagWeight} onChange={e => setNewPax(p => ({...p, excessBagWeight: Number(e.target.value)}))} />
+                                            </div>
+                                            <div className="w-16">
+                                                <label className={compactLabelClass}>Seat</label>
+                                                <input placeholder="1A" className={compactInputClass} value={newPax.seatNumber} onChange={e => setNewPax(p => ({...p, seatNumber: e.target.value.toUpperCase()}))} />
+                                            </div>
+                                            <div className="w-20">
+                                                <label className={compactLabelClass}>Passport</label>
+                                                <input placeholder="P123" className={compactInputClass} value={newPax.passportNumber} onChange={e => setNewPax(p => ({...p, passportNumber: e.target.value.toUpperCase()}))} />
+                                            </div>
+                                            <div className="w-20">
+                                                <label className={compactLabelClass}>Bag Tag</label>
+                                                <input placeholder="TAG" className={compactInputClass} value={newPax.bagTag} onChange={e => setNewPax(p => ({...p, bagTag: e.target.value}))} />
+                                            </div>
+                                            <div className="w-20">
+                                                <label className={compactLabelClass}>Ticket</label>
+                                                <input placeholder="TKT" className={compactInputClass} value={newPax.ticketNumber} onChange={e => setNewPax(p => ({...p, ticketNumber: e.target.value}))} />
+                                            </div>
+                                            <div className="flex items-center pb-2 pl-1">
+                                                <label className="flex items-center gap-1 cursor-pointer select-none">
+                                                    <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={newPax.isInfant} onChange={e => setNewPax(p => ({...p, isInfant: e.target.checked}))} />
+                                                    <span className="text-[10px] font-bold text-slate-700">INF</span>
+                                                </label>
+                                            </div>
+                                            <div>
+                                                {editingPaxId ? (
+                                                    <div className="flex gap-1">
+                                                        <button onClick={handleCancelEdit} className="h-8 px-2 bg-slate-200 text-slate-700 rounded text-xs font-bold">Cancel</button>
+                                                        <button onClick={handleSavePax} className="h-8 px-2 bg-blue-600 text-white rounded text-xs font-bold">Update</button>
+                                                    </div>
+                                                ) : (
+                                                    <button onClick={handleSavePax} className="h-8 px-3 bg-blue-600 text-white rounded text-xs font-bold whitespace-nowrap shadow-sm hover:bg-blue-700">Add Pax</button>
+                                                )}
                                             </div>
                                         </div>
 
@@ -687,6 +716,8 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                                                 <tr>
                                                     <th className="px-6 py-3">Name</th>
                                                     <th className="px-6 py-3">Weight</th>
+                                                    <th className="px-6 py-3">Free Bag</th>
+                                                    <th className="px-6 py-3">Exc Bag</th>
                                                     <th className="px-6 py-3">Seat</th>
                                                     <th className="px-6 py-3">Passport</th>
                                                     <th className="px-6 py-3 text-center">Infant</th>
@@ -698,6 +729,8 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                                                     <tr key={p.id} className="hover:bg-slate-50 group">
                                                         <td className="px-6 py-3 font-bold text-slate-800">{p.lastName}, {p.firstName}</td>
                                                         <td className="px-6 py-3 font-mono">{p.weight} Lbs</td>
+                                                        <td className="px-6 py-3 font-mono">{p.freeBagWeight || 0} Lbs</td>
+                                                        <td className="px-6 py-3 font-mono">{p.excessBagWeight || 0} Lbs</td>
                                                         <td className="px-6 py-3 font-mono">{p.seatNumber || '-'}</td>
                                                         <td className="px-6 py-3 font-mono">{p.passportNumber || '-'}</td>
                                                         <td className="px-6 py-3 text-center font-bold text-blue-600">{p.isInfant ? 'YES' : '-'}</td>
@@ -710,7 +743,7 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                                                     </tr>
                                                 ))}
                                                 {(!dispatchData.passengers || dispatchData.passengers.length === 0) && (
-                                                    <tr><td colSpan={6} className="text-center py-8 text-slate-400 italic">No passengers added.</td></tr>
+                                                    <tr><td colSpan={8} className="text-center py-8 text-slate-400 italic">No passengers added.</td></tr>
                                                 )}
                                             </tbody>
                                         </table>
@@ -727,36 +760,29 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                                             </span>
                                         </div>
                                         
-                                        <div className="p-5 border-b border-slate-200 space-y-4 bg-slate-50/50">
-                                            <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                                                <div className="md:col-span-2">
-                                                    <label className={labelClass}>Consignor</label>
-                                                    <input placeholder="Sender Name" className={inputClass} value={newCargo.consignor} onChange={e => setNewCargo(p => ({...p, consignor: e.target.value}))} />
-                                                </div>
-                                                <div className="md:col-span-2">
-                                                    <label className={labelClass}>Consignee</label>
-                                                    <input placeholder="Receiver Name" className={inputClass} value={newCargo.consignee} onChange={e => setNewCargo(p => ({...p, consignee: e.target.value}))} />
-                                                </div>
-                                                <div>
-                                                    <label className={labelClass}>Weight (Lbs)</label>
-                                                    <input type="number" className={inputClass} value={newCargo.weight || ''} onChange={e => setNewCargo(p => ({...p, weight: Number(e.target.value)}))} />
-                                                </div>
-                                                <div>
-                                                    <label className={labelClass}>Pieces</label>
-                                                    <input type="number" className={inputClass} value={newCargo.pieces} onChange={e => setNewCargo(p => ({...p, pieces: Number(e.target.value)}))} />
-                                                </div>
+                                        {/* Cargo Input - Single Row */}
+                                        <div className="p-3 border-b border-slate-200 bg-slate-50/50 flex items-end gap-2 overflow-x-auto">
+                                            <div className="flex-1 min-w-[120px]">
+                                                <label className={compactLabelClass}>Consignor</label>
+                                                <input placeholder="Sender Name" className={compactInputClass} value={newCargo.consignor} onChange={e => setNewCargo(p => ({...p, consignor: e.target.value}))} />
                                             </div>
-                                            <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                                                <div className="md:col-span-4">
-                                                    <label className={labelClass}>Description / Notes</label>
-                                                    <input placeholder="e.g. Machine Parts, Perishables" className={inputClass} value={newCargo.description} onChange={e => setNewCargo(p => ({...p, description: e.target.value}))} />
-                                                </div>
-                                                <div className="md:col-span-2">
-                                                    <button onClick={handleAddCargo} className="w-full bg-amber-500 text-white rounded-lg h-[42px] font-bold hover:bg-amber-600 shadow-md flex items-center justify-center gap-2 transition-all">
-                                                        <Plus size={18}/> Add Cargo
-                                                    </button>
-                                                </div>
+                                            <div className="flex-1 min-w-[120px]">
+                                                <label className={compactLabelClass}>Consignee</label>
+                                                <input placeholder="Receiver Name" className={compactInputClass} value={newCargo.consignee} onChange={e => setNewCargo(p => ({...p, consignee: e.target.value}))} />
                                             </div>
+                                            <div className="w-20">
+                                                <label className={compactLabelClass}>Weight</label>
+                                                <input type="number" className={compactInputClass} value={newCargo.weight || ''} onChange={e => setNewCargo(p => ({...p, weight: Number(e.target.value)}))} />
+                                            </div>
+                                            <div className="w-16">
+                                                <label className={compactLabelClass}>Pieces</label>
+                                                <input type="number" className={compactInputClass} value={newCargo.pieces} onChange={e => setNewCargo(p => ({...p, pieces: Number(e.target.value)}))} />
+                                            </div>
+                                            <div className="flex-[1.5] min-w-[150px]">
+                                                <label className={compactLabelClass}>Description</label>
+                                                <input placeholder="Description" className={compactInputClass} value={newCargo.description} onChange={e => setNewCargo(p => ({...p, description: e.target.value}))} />
+                                            </div>
+                                            <button onClick={handleAddCargo} className="h-8 px-3 bg-amber-500 text-white rounded text-xs font-bold whitespace-nowrap shadow-sm hover:bg-amber-600">Add Cargo</button>
                                         </div>
 
                                         <table className="w-full text-sm text-left">
@@ -792,22 +818,27 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                                         </table>
                                     </div>
                                     
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-800 p-4 rounded-xl text-white">
+                                    {/* Weight Summary - Updated Layout */}
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 bg-slate-800 p-4 rounded-xl text-white shadow-lg">
                                         <div className="text-center border-r border-slate-700">
-                                            <div className="text-xs text-slate-400 uppercase font-bold">Total Pax Weight</div>
-                                            <div className="text-xl font-black">{totalPaxWeight} Lbs</div>
+                                            <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Pax Weight</div>
+                                            <div className="text-lg font-black">{totalPaxWeight} Lbs</div>
                                         </div>
                                         <div className="text-center border-r border-slate-700">
-                                            <div className="text-xs text-slate-400 uppercase font-bold">Total Cargo Weight</div>
-                                            <div className="text-xl font-black">{totalCargoWeight} Lbs</div>
+                                            <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Free Bags</div>
+                                            <div className="text-lg font-black text-blue-300">{totalFreeBagWeight} Lbs</div>
                                         </div>
                                         <div className="text-center border-r border-slate-700">
-                                            <div className="text-xs text-slate-400 uppercase font-bold">Total Payload</div>
-                                            <div className="text-xl font-black text-blue-400">{payload} Lbs</div>
+                                            <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Excess Bags</div>
+                                            <div className="text-lg font-black text-amber-300">{totalExcessBagWeight} Lbs</div>
+                                        </div>
+                                        <div className="text-center border-r border-slate-700">
+                                            <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Cargo Weight</div>
+                                            <div className="text-lg font-black">{totalCargoWeight} Lbs</div>
                                         </div>
                                         <div className="text-center">
-                                            <div className="text-xs text-slate-400 uppercase font-bold">Zero Fuel Weight</div>
-                                            <div className="text-xl font-black text-emerald-400">{zeroFuelWeight} Lbs</div>
+                                            <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Total Payload</div>
+                                            <div className="text-xl font-black text-emerald-400">{payload} Lbs</div>
                                         </div>
                                     </div>
                                 </div>
@@ -886,74 +917,179 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                                 </div>
                             )}
 
+                            {/* TAB: OPS FPL */}
                             {activeTab === 'opsplan' && (
-                                <div className="max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-2">
-                                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-6">
-                                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                                            <ScrollText size={20} className="text-blue-600"/> Operational Flight Plan
-                                        </h3>
-                                        
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            <div>
-                                                <label className={labelClass}>Type of Operation</label>
-                                                <select 
-                                                    className={inputClass}
-                                                    value={dispatchData.opsPlan?.typeOfOperation}
-                                                    onChange={e => updateOpsPlan('typeOfOperation', e.target.value)}
-                                                >
-                                                    <option value="VFR">VFR - Visual Flight Rules</option>
-                                                    <option value="IFR">IFR - Instrument Flight Rules</option>
-                                                </select>
+                                <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-2 pb-12">
+                                    <div className="bg-white shadow-lg border border-slate-300 w-full text-xs text-slate-900 print:border-none print:shadow-none">
+                                        {/* Header Block */}
+                                        <div className="flex border-b-2 border-slate-800">
+                                            <div className="flex-1 p-2 border-r border-slate-300">
+                                                <div className="font-bold text-slate-500 uppercase text-[10px]">Date of Flight</div>
+                                                <div className="font-bold text-lg">{selectedFlight.date}</div>
                                             </div>
-                                            <div>
-                                                <label className={labelClass}>Flight Type</label>
-                                                <select 
-                                                    className={inputClass}
-                                                    value={dispatchData.opsPlan?.flightType}
-                                                    onChange={e => updateOpsPlan('flightType', e.target.value)}
-                                                >
-                                                    <option value="Schedule">Schedule</option>
-                                                    <option value="Non-Schedule">Non-Schedule / Charter</option>
-                                                    <option value="General Aviation">General Aviation</option>
-                                                </select>
+                                            <div className="flex-1 p-2 border-r border-slate-300">
+                                                <div className="font-bold text-slate-500 uppercase text-[10px]">Acft Registration</div>
+                                                <div className="font-bold text-lg">{selectedFlight.aircraftRegistration}</div>
+                                            </div>
+                                            <div className="flex-1 p-2 border-r border-slate-300">
+                                                <div className="font-bold text-slate-500 uppercase text-[10px]">Acft Type</div>
+                                                <div className="font-bold text-lg">{selectedFlight.aircraftType}</div>
+                                            </div>
+                                            <div className="flex-1 p-2 bg-slate-50">
+                                                <div className="font-bold text-slate-500 uppercase text-[10px]">Flight No.</div>
+                                                <div className="font-bold text-lg">{selectedFlight.flightNumber}</div>
                                             </div>
                                         </div>
 
-                                        <div className="space-y-4 border-t border-slate-100 pt-4">
-                                            <h4 className="text-sm font-bold text-slate-700">Weather Briefing</h4>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className={labelClass}>Destination METAR/TAF</label>
-                                                    <textarea 
-                                                        rows={3} 
-                                                        className={inputClass} 
-                                                        placeholder="Paste weather report..."
-                                                        value={dispatchData.opsPlan?.weatherDest}
-                                                        onChange={e => updateOpsPlan('weatherDest', e.target.value)}
-                                                    />
+                                        {/* Crew & Time Block */}
+                                        <div className="flex border-b border-slate-300">
+                                            <div className="flex-[2] border-r border-slate-300">
+                                                <div className="flex border-b border-slate-300">
+                                                    <div className="w-24 p-2 font-bold bg-slate-50 border-r border-slate-200">PILOT:</div>
+                                                    <div className="p-2 font-bold">{selectedFlight.pic}</div>
                                                 </div>
-                                                <div>
-                                                    <label className={labelClass}>Alternate METAR/TAF</label>
-                                                    <textarea 
-                                                        rows={3} 
-                                                        className={inputClass} 
-                                                        placeholder="Paste weather report..."
-                                                        value={dispatchData.opsPlan?.weatherAlt}
-                                                        onChange={e => updateOpsPlan('weatherAlt', e.target.value)}
+                                                <div className="flex border-b border-slate-300">
+                                                    <div className="w-24 p-2 font-bold bg-slate-50 border-r border-slate-200">COPILOT:</div>
+                                                    <div className="p-2 font-bold">{selectedFlight.sic || 'NIL'}</div>
+                                                </div>
+                                                <div className="flex">
+                                                    <div className="w-24 p-2 font-bold bg-slate-50 border-r border-slate-200">CABIN CREW:</div>
+                                                    <div className="p-2 font-bold">NIL</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex-1 border-r border-slate-300">
+                                                <div className="flex border-b border-slate-300 h-1/2 items-center">
+                                                    <div className="px-2 font-bold bg-slate-50 h-full flex items-center border-r border-slate-200 w-24">DEPARTURE:</div>
+                                                    <div className="px-2 font-mono font-bold text-lg">{selectedFlight.etd}</div>
+                                                </div>
+                                                <div className="flex h-1/2 items-center">
+                                                    <div className="px-2 font-bold bg-slate-50 h-full flex items-center border-r border-slate-200 w-24">ARRIVAL:</div>
+                                                    <input 
+                                                        type="time" 
+                                                        className="px-2 font-mono font-bold text-lg outline-none bg-transparent w-full" 
+                                                        value={dispatchData.opsPlan?.arrivalTime} 
+                                                        onChange={(e) => updateOpsPlan('arrivalTime', e.target.value)} 
                                                     />
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <div className="space-y-4 border-t border-slate-100 pt-4">
-                                            <label className={labelClass}>General Remarks / NOTAMs</label>
-                                            <textarea 
-                                                rows={4} 
-                                                className={inputClass} 
-                                                placeholder="Enter operational notes, NOTAMs, or specific instructions..."
-                                                value={dispatchData.opsPlan?.remarks}
-                                                onChange={e => updateOpsPlan('remarks', e.target.value)}
-                                            />
+                                        {/* Route Block */}
+                                        <div className="grid grid-cols-2 border-b border-slate-300">
+                                            <div className="border-r border-slate-300 p-2">
+                                                <table className="w-full text-center border-collapse border border-slate-300">
+                                                    <thead className="bg-slate-100">
+                                                        <tr>
+                                                            <th className="border border-slate-300 p-1">FROM</th>
+                                                            <th className="border border-slate-300 p-1">TO</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr>
+                                                            <td className="border border-slate-300 p-1">
+                                                                <input 
+                                                                    className="w-full text-center font-bold uppercase outline-none bg-transparent" 
+                                                                    value={dispatchData.opsPlan?.depAerodrome} 
+                                                                    onChange={(e) => updateOpsPlan('depAerodrome', e.target.value.toUpperCase())}
+                                                                />
+                                                            </td>
+                                                            <td className="border border-slate-300 p-1">
+                                                                <input 
+                                                                    className="w-full text-center font-bold uppercase outline-none bg-transparent" 
+                                                                    value={dispatchData.opsPlan?.destAerodrome} 
+                                                                    onChange={(e) => updateOpsPlan('destAerodrome', e.target.value.toUpperCase())}
+                                                                />
+                                                            </td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td className="border border-slate-300 p-1 h-6"></td>
+                                                            <td className="border border-slate-300 p-1 h-6"></td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div className="p-2 space-y-2">
+                                                <div className="flex items-center">
+                                                    <span className="w-32 font-bold text-[10px] uppercase">Destination Aerodrome</span>
+                                                    <input className="border-b border-slate-400 outline-none flex-1 font-mono uppercase bg-transparent" placeholder="DEST" value={dispatchData.opsPlan?.destAerodrome} onChange={(e) => updateOpsPlan('destAerodrome', e.target.value)} />
+                                                </div>
+                                                <div className="flex items-center">
+                                                    <span className="w-32 font-bold text-[10px] uppercase">Alternate Aerodrome</span>
+                                                    <div className="flex-1 flex gap-2">
+                                                        <div className="flex-1 border border-slate-300 p-1 bg-slate-50 text-center font-bold">
+                                                            First: <input className="w-12 bg-transparent outline-none uppercase" value={dispatchData.opsPlan?.altAerodrome1} onChange={(e) => updateOpsPlan('altAerodrome1', e.target.value)} />
+                                                        </div>
+                                                        <div className="flex-1 border border-slate-300 p-1 bg-slate-50 text-center font-bold">
+                                                            Second: <input className="w-12 bg-transparent outline-none uppercase" value={dispatchData.opsPlan?.altAerodrome2} onChange={(e) => updateOpsPlan('altAerodrome2', e.target.value)} />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Fuel & Ops Type */}
+                                        <div className="flex border-b border-slate-300">
+                                            <div className="w-48 border-r border-slate-300 p-2 space-y-1">
+                                                <div className="flex justify-between border-b border-slate-200 pb-1">
+                                                    <span className="font-bold">Gals:</span>
+                                                    <span className="font-mono">{(dispatchData.fuel?.totalFob && dispatchData.fuel?.density) ? (dispatchData.fuel.totalFob / dispatchData.fuel.density).toFixed(1) : '-'}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="font-bold">Pounds:</span>
+                                                    <span className="font-mono">{dispatchData.fuel?.totalFob || 0}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex-1 border-r border-slate-300 p-2">
+                                                <div className="font-bold text-[10px] uppercase mb-1">Type of Operation</div>
+                                                <div className="flex gap-4">
+                                                    <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="opType" checked={dispatchData.opsPlan?.typeOfOperation === 'IFR'} onChange={() => updateOpsPlan('typeOfOperation', 'IFR')} /> I.F.R.</label>
+                                                    <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="opType" checked={dispatchData.opsPlan?.typeOfOperation === 'VFR'} onChange={() => updateOpsPlan('typeOfOperation', 'VFR')} /> V.F.R.</label>
+                                                </div>
+                                            </div>
+                                            <div className="flex-1 p-2">
+                                                <div className="font-bold text-[10px] uppercase mb-1">Type of Flight</div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="fltType" checked={dispatchData.opsPlan?.flightType === 'Schedule'} onChange={() => updateOpsPlan('flightType', 'Schedule')} /> Schedule</label>
+                                                    <label className="flex items-center gap-1 cursor-pointer"><input type="radio" name="fltType" checked={dispatchData.opsPlan?.flightType === 'Non-Schedule'} onChange={() => updateOpsPlan('flightType', 'Non-Schedule')} /> Non-Schedule</label>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Weather */}
+                                        <div className="border-b border-slate-300">
+                                            <div className="bg-slate-100 p-1 text-center font-bold text-[10px] border-b border-slate-300">LATEST AVAILABLE WEATHER REPORTS & FORECASTS</div>
+                                            <div className="flex border-b border-slate-300">
+                                                <div className="w-24 p-2 font-bold bg-slate-50 border-r border-slate-200 flex items-center">Destination:</div>
+                                                <textarea className="flex-1 p-2 outline-none resize-none h-16 bg-white" placeholder="METAR/TAF..." value={dispatchData.opsPlan?.weatherDest} onChange={(e) => updateOpsPlan('weatherDest', e.target.value)}></textarea>
+                                            </div>
+                                            <div className="flex border-b border-slate-300">
+                                                <div className="w-24 p-2 font-bold bg-slate-50 border-r border-slate-200 flex items-center">Alternate:</div>
+                                                <textarea className="flex-1 p-2 outline-none resize-none h-16 bg-white" placeholder="METAR/TAF..." value={dispatchData.opsPlan?.weatherAlt} onChange={(e) => updateOpsPlan('weatherAlt', e.target.value)}></textarea>
+                                            </div>
+                                            <div className="flex">
+                                                <div className="w-24 p-2 font-bold bg-slate-50 border-r border-slate-200 flex items-center">Add. Info:</div>
+                                                <textarea className="flex-1 p-2 outline-none resize-none h-12 bg-white" placeholder="NOTAMs / Remarks..." value={dispatchData.opsPlan?.additionalWx} onChange={(e) => updateOpsPlan('additionalWx', e.target.value)}></textarea>
+                                            </div>
+                                        </div>
+
+                                        {/* Remarks */}
+                                        <div className="border-b border-slate-300 min-h-[100px] p-2">
+                                            <div className="font-bold text-[10px] uppercase text-center mb-1">REMARKS</div>
+                                            <textarea className="w-full h-24 outline-none resize-none bg-white font-mono text-xs" placeholder="Operational Remarks..." value={dispatchData.opsPlan?.remarks} onChange={(e) => updateOpsPlan('remarks', e.target.value)}></textarea>
+                                        </div>
+
+                                        {/* Signatures */}
+                                        <div className="flex h-20">
+                                            <div className="flex-1 border-r border-slate-300 relative">
+                                                <div className="absolute top-1 left-2 text-[10px] font-bold text-slate-500">PREPARED BY</div>
+                                                <div className="absolute bottom-2 left-4 w-48 border-b border-slate-400"></div>
+                                                <div className="absolute bottom-0 left-4 text-[8px] text-slate-400 font-bold uppercase">Signature</div>
+                                            </div>
+                                            <div className="flex-1 relative">
+                                                <div className="absolute top-1 right-2 text-[10px] font-bold text-slate-500">CAPTAIN'S ACCEPTANCE</div>
+                                                <div className="absolute bottom-2 right-4 w-48 border-b border-slate-400"></div>
+                                                <div className="absolute bottom-0 right-4 text-[8px] text-slate-400 font-bold uppercase">Signature</div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -962,7 +1098,7 @@ export const DispatchManager: React.FC<DispatchManagerProps> = ({ flights, fleet
                             {/* TAB 8: NOTOC */}
                             {activeTab === 'notoc' && (
                                 <div className="max-w-[1400px] mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 pb-12">
-                                    
+                                    {/* ... NOTOC Content ... */}
                                     {/* Dangerous Goods Section */}
                                     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                                         <div className="p-4 bg-rose-50 border-b border-rose-100 flex justify-between items-center">

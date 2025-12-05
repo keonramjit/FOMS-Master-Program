@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Flight, Aircraft, CrewMember, CustomerDefinition, SystemSettings } from '../types';
 import { X, Save, Plane, Calendar, Clock, User, MapPin, ChevronDown, ArrowRightLeft, Timer, Hash, AlertTriangle, AlertCircle } from 'lucide-react';
@@ -114,7 +115,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         const d = new Date();
         const todayStr = d.toISOString().split('T')[0];
         setFormData({
-            flightNumber: '', date: todayStr, route: '', aircraftRegistration: '', aircraftType: 'C208B', etd: '08:00', flightTime: 0, commercialTime: '', pic: '', sic: '', customer: '', customerId: '', status: 'Scheduled', notes: ''
+            flightNumber: '', date: todayStr, route: 'OGL-', aircraftRegistration: '', aircraftType: 'C208B', etd: '08:00', flightTime: 0, commercialTime: '', pic: '', sic: '', customer: '', customerId: '', status: 'Scheduled', notes: ''
         });
         setCreateReturn(false);
         setWarnings([]);
@@ -148,7 +149,8 @@ export const FlightModal: React.FC<FlightModalProps> = ({
     if (match) {
         const val = parseInt(match[0], 10);
         const prefix = num.slice(0, match.index);
-        return `${prefix}${val + 1}`;
+        // Req 1: Return flight increases by 10 (e.g. 1013 -> 1023)
+        return `${prefix}${val + 10}`;
     }
     return num;
   };

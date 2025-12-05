@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition } from '../types';
 import { CalendarWidget } from './CalendarWidget';
-import { Plus, Trash2, MapPin, User, Hash, Clock, AlertCircle, RefreshCw, CheckCircle2, Plane, Save, ChevronDown, X, Activity, FileDown, ArrowRightLeft } from 'lucide-react';
+import { Plus, Trash2, MapPin, User, Hash, Clock, RefreshCw, CheckCircle2, Plane, Save, ChevronDown, Activity, FileDown, ArrowRightLeft, AlertCircle } from 'lucide-react';
 import { syncFlightSchedule } from '../services/firebase';
 
 interface FlightPlanningProps {
@@ -121,7 +121,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     const newFlight: Flight = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       flightNumber: 'TGY',
-      route: '',
+      route: 'OGL-', // Req 4: Default departure airport as Ogle
       aircraftRegistration: aircraft.registration,
       aircraftType: aircraft.type,
       etd: '',
@@ -149,13 +149,8 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         }
     }
 
-    let newFlightNum = 'TGY';
-    const numMatch = sourceFlight.flightNumber.match(/(\d+)$/);
-    if (numMatch) {
-        const currentNum = parseInt(numMatch[0], 10);
-        const prefix = sourceFlight.flightNumber.substring(0, numMatch.index);
-        newFlightNum = `${prefix}${currentNum + 1}`;
-    }
+    // Req 2: Sector retains the original flight number
+    const newFlightNum = sourceFlight.flightNumber;
 
     const parentId = sourceFlight.parentId || sourceFlight.id;
     const newFlight: Flight = {
@@ -200,12 +195,13 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         }
     }
 
+    // Req 1: Return flight increases by 10 (e.g. 1013 -> 1023)
     let newFlightNum = 'TGY';
     const numMatch = sourceFlight.flightNumber.match(/(\d+)$/);
     if (numMatch) {
         const currentNum = parseInt(numMatch[0], 10);
         const prefix = sourceFlight.flightNumber.substring(0, numMatch.index);
-        newFlightNum = `${prefix}${currentNum + 1}`;
+        newFlightNum = `${prefix}${currentNum + 10}`;
     }
 
     let newEtd = '';
@@ -325,11 +321,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     }
     return { from: route, to: '' };
   };
-
-  // Derive unique airports from existing routes for suggestions
-  const uniqueAirports = Array.from(new Set(
-      routes.flatMap(r => r.code.split('-'))
-  )).sort();
 
   return (
     <div className="flex flex-col h-full bg-slate-50 relative">
@@ -482,11 +473,12 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
                                             </div>
                                             <div className={cellWrapperClass}><input value={flight.customerId || ''} onChange={(e) => handleCellChange(flight.id, 'customerId', e.target.value)} className={`${inputClass} text-slate-600 font-mono text-center`} placeholder="---" /></div>
                                             
+                                            {/* Req 3: Removed Dropdowns for Airports */}
                                             <div className={cellWrapperClass}>
-                                                <input list="airport-options" value={routeParts.from} onChange={(e) => { const newVal = e.target.value.toUpperCase(); handleRouteChange(flight.id, `${newVal}-${routeParts.to}`); }} className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`} placeholder="DEP" />
+                                                <input value={routeParts.from} onChange={(e) => { const newVal = e.target.value.toUpperCase(); handleRouteChange(flight.id, `${newVal}-${routeParts.to}`); }} className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`} placeholder="DEP" />
                                             </div>
                                             <div className={cellWrapperClass}>
-                                                <input list="airport-options" value={routeParts.to} onChange={(e) => { const newVal = e.target.value.toUpperCase(); handleRouteChange(flight.id, `${routeParts.from}-${newVal}`); }} className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`} placeholder="ARR" />
+                                                <input value={routeParts.to} onChange={(e) => { const newVal = e.target.value.toUpperCase(); handleRouteChange(flight.id, `${routeParts.from}-${newVal}`); }} className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`} placeholder="ARR" />
                                             </div>
                 
                                             <div className={cellWrapperClass}><select value={flight.pic} onChange={(e) => handleCellChange(flight.id, 'pic', e.target.value)} className={`${selectClass} text-center font-bold text-slate-800 uppercase`}><option value="">--</option>{pilots.map(p => <option key={p.code} value={p.code}>{p.code}</option>)}</select><ChevronDown size={12} className="absolute right-2 text-slate-400 pointer-events-none" /></div>
@@ -518,12 +510,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
                 );
             })}
             </div>
-            
-            <datalist id="airport-options">
-                {uniqueAirports.map(code => (
-                    <option key={code} value={code} />
-                ))}
-            </datalist>
 
         </div>
       </div>
