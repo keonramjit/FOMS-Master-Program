@@ -1,14 +1,11 @@
 
 import React, { useState, useMemo, useEffect, Suspense } from 'react';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
-import { StatsCards } from './components/StatsCards';
-import { FlightTable } from './components/FlightTable';
-import { CalendarWidget } from './components/CalendarWidget';
 import { FlightModal } from './components/FlightModal';
-import { DigitalClock } from './components/DigitalClock';
 import { LoginScreen } from './components/LoginScreen';
 import { Flight, OperationsStats, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, FlightStatus, SystemSettings, UserProfile, LocationDefinition } from './types';
-import { Loader2, AlertCircle, Menu, PlaneTakeoff, Activity } from 'lucide-react';
+import { Loader2, Menu, PlaneTakeoff } from 'lucide-react';
 import { INITIAL_FLIGHTS, CREW_ROSTER, FLEET_INVENTORY } from './constants';
 import { 
   subscribeToFlights, 
@@ -48,16 +45,17 @@ import {
 } from './services/firebase';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Code Splitting - Lazy Load Major Components
-const CrewManager = React.lazy(() => import('./components/CrewManager').then(module => ({ default: module.CrewManager })));
-const FleetManager = React.lazy(() => import('./components/FleetManager').then(module => ({ default: module.FleetManager })));
-const FlightPlanning = React.lazy(() => import('./components/FlightPlanning').then(module => ({ default: module.FlightPlanning })));
-const RouteManager = React.lazy(() => import('./components/RouteManager').then(module => ({ default: module.RouteManager })));
-const CustomerManager = React.lazy(() => import('./components/CustomerManager').then(module => ({ default: module.CustomerManager })));
-const DispatchManager = React.lazy(() => import('./components/DispatchManager').then(module => ({ default: module.DispatchManager })));
-const VoyageReportManager = React.lazy(() => import('./components/VoyageReportManager').then(module => ({ default: module.VoyageReportManager })));
-const TrainingManager = React.lazy(() => import('./components/TrainingManager').then(module => ({ default: module.TrainingManager })));
-const SubscriptionManagement = React.lazy(() => import('./components/SubscriptionManagement').then(module => ({ default: module.SubscriptionManagement })));
+// Lazy Load Pages
+const DashboardPage = React.lazy(() => import('./pages/DashboardPage').then(module => ({ default: module.DashboardPage })));
+const PlanningPage = React.lazy(() => import('./pages/PlanningPage').then(module => ({ default: module.PlanningPage })));
+const DispatchPage = React.lazy(() => import('./pages/DispatchPage').then(module => ({ default: module.DispatchPage })));
+const CrewPage = React.lazy(() => import('./pages/CrewPage').then(module => ({ default: module.CrewPage })));
+const FleetPage = React.lazy(() => import('./pages/FleetPage').then(module => ({ default: module.FleetPage })));
+const VoyagePage = React.lazy(() => import('./pages/VoyagePage').then(module => ({ default: module.VoyagePage })));
+const TrainingPage = React.lazy(() => import('./pages/TrainingPage').then(module => ({ default: module.TrainingPage })));
+const RoutePage = React.lazy(() => import('./pages/RoutePage').then(module => ({ default: module.RoutePage })));
+const CustomerPage = React.lazy(() => import('./pages/CustomerPage').then(module => ({ default: module.CustomerPage })));
+const AdminPage = React.lazy(() => import('./pages/AdminPage').then(module => ({ default: module.AdminPage })));
 
 const App: React.FC = () => {
   // Auth State
@@ -67,8 +65,6 @@ const App: React.FC = () => {
   const [isDemoMode, setIsDemoMode] = useState(false);
 
   // App State
-  const [currentView, setCurrentView] = useState('dashboard');
-  
   const [currentDate, setCurrentDate] = useState<string>(() => {
     const d = new Date();
     const year = d.getFullYear();
@@ -106,7 +102,7 @@ const App: React.FC = () => {
 
   const [isFlightModalOpen, setIsFlightModalOpen] = useState(false);
   const [editingFlight, setEditingFlight] = useState<Flight | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
 
   // 1. Listen for Auth Changes AND Fetch Profile
   useEffect(() => {
@@ -250,33 +246,174 @@ const App: React.FC = () => {
   if (!user && !isDemoMode) return <LoginScreen onDemoLogin={() => setIsDemoMode(true)} />;
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
-      <Sidebar 
-        currentView={currentView} 
-        onNavigate={setCurrentView} 
-        onLogout={logoutUser}
-        userEmail={user?.email}
-        isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
-        features={features}
-        isDesktopOpen={isDesktopSidebarOpen}
-        onDesktopToggle={() => setIsDesktopSidebarOpen(!isDesktopSidebarOpen)}
-      />
+    <Router>
+      <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
+        <Sidebar 
+          onLogout={logoutUser}
+          userEmail={user?.email}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
+          features={features}
+          isDesktopOpen={isDesktopSidebarOpen}
+          onDesktopToggle={() => setIsDesktopSidebarOpen(!isDesktopSidebarOpen)}
+        />
 
-      <main className={`flex-1 overflow-y-auto relative w-full transition-all duration-300 ${isDesktopSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
-        {/* Mobile Header */}
-        <div className="lg:hidden bg-slate-900 text-white p-4 flex items-center justify-between shadow-md sticky top-0 z-20">
-            <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0"><PlaneTakeoff className="text-white" size={18} /></div>
-                <h1 className="font-bold text-sm tracking-wide">FOMS FLIGHT OPS</h1>
-            </div>
-            <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-slate-800 rounded-lg"><Menu size={24} /></button>
-        </div>
+        <main className={`flex-1 overflow-y-auto relative w-full transition-all duration-300 ${isDesktopSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}`}>
+          {/* Mobile Header */}
+          <div className="lg:hidden bg-slate-900 text-white p-4 flex items-center justify-between shadow-md sticky top-0 z-20">
+              <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0"><PlaneTakeoff className="text-white" size={18} /></div>
+                  <h1 className="font-bold text-sm tracking-wide">FOMS FLIGHT OPS</h1>
+              </div>
+              <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-slate-800 rounded-lg"><Menu size={24} /></button>
+          </div>
 
-        <Suspense fallback={<div className="h-full flex items-center justify-center text-slate-400 gap-3"><Loader2 size={40} className="animate-spin text-blue-500" /></div>}>
-            <ErrorBoundary>
-                {currentView === 'access' ? (
-                    <SubscriptionManagement 
+          <Suspense fallback={<div className="h-full flex items-center justify-center text-slate-400 gap-3"><Loader2 size={40} className="animate-spin text-blue-500" /></div>}>
+              <ErrorBoundary>
+                <Routes>
+                  {/* Dashboard */}
+                  <Route path="/" element={
+                    <DashboardPage 
+                      currentDate={currentDate}
+                      onDateChange={setCurrentDate}
+                      stats={stats}
+                      filteredFlights={filteredFlights}
+                      onStatusUpdate={handleStatusUpdate}
+                    />
+                  } />
+
+                  {/* Flight Planning */}
+                  <Route path="/planning" element={
+                    features.enableFlightPlanning ? (
+                      <PlanningPage 
+                        currentDate={currentDate} 
+                        onDateChange={setCurrentDate} 
+                        flights={flights} 
+                        fleet={fleet} 
+                        crew={crewRoster} 
+                        routes={routes} 
+                        customers={customers} 
+                        onAddFlight={addFlight} 
+                        onUpdateFlight={updateFlight} 
+                        onDeleteFlight={deleteFlight} 
+                      />
+                    ) : <Navigate to="/" />
+                  } />
+
+                  {/* Dispatch */}
+                  <Route path="/dispatch" element={
+                    features.enableDispatch ? (
+                      <DispatchPage 
+                        flights={flights} 
+                        fleet={fleet} 
+                        crew={crewRoster} 
+                        currentDate={currentDate} 
+                        isEnabled={features.enableDispatch} 
+                        onDateChange={setCurrentDate} 
+                        features={features} 
+                      />
+                    ) : <Navigate to="/" />
+                  } />
+
+                  {/* Crew */}
+                  <Route path="/crew" element={
+                    features.enableCrewManagement ? (
+                      <CrewPage 
+                        crewRoster={crewRoster} 
+                        flights={flights} 
+                        routes={routes} 
+                        onAdd={addCrewMember} 
+                        onUpdate={updateCrewMember} 
+                        features={features} 
+                      />
+                    ) : <Navigate to="/" />
+                  } />
+
+                  {/* Fleet */}
+                  <Route path="/fleet" element={
+                    features.enableFleetManagement ? (
+                      <FleetPage 
+                        fleet={fleet} 
+                        flights={flights} 
+                        onAdd={addAircraft} 
+                        onUpdate={updateAircraft} 
+                        features={features} 
+                      />
+                    ) : <Navigate to="/" />
+                  } />
+
+                  {/* Voyage Reports */}
+                  <Route path="/voyage" element={
+                    features.enableVoyageReports ? (
+                      <VoyagePage 
+                        flights={flights} 
+                        fleet={fleet} 
+                        crew={crewRoster} 
+                        currentDate={currentDate} 
+                        isEnabled={features.enableVoyageReports} 
+                        onDateChange={setCurrentDate} 
+                      />
+                    ) : <Navigate to="/" />
+                  } />
+
+                  {/* Training */}
+                  <Route path="/training" element={
+                    features.enableTrainingManagement ? (
+                      <TrainingPage 
+                        crew={crewRoster} 
+                        features={features} 
+                        onAddRecord={addTrainingRecord} 
+                        onUpdateRecord={updateTrainingRecord} 
+                        onDeleteRecord={deleteTrainingRecord} 
+                        onAddEvent={addTrainingEvent} 
+                        onUpdateEvent={updateTrainingEvent} 
+                        onDeleteEvent={deleteTrainingEvent} 
+                      />
+                    ) : <Navigate to="/" />
+                  } />
+
+                  {/* Routes */}
+                  <Route path="/routes" element={
+                    features.enableRouteManagement ? (
+                      <RoutePage 
+                        routes={routes} 
+                        locations={locations}
+                        onAddRoute={addRoute} 
+                        onUpdateRoute={updateRoute} 
+                        onDeleteRoute={deleteRoute} 
+                        onAddLocation={async (l) => {
+                            if(isDemoMode) setLocations(prev => [...prev, { ...l, id: `demo-${Date.now()}` }]);
+                            else await addLocation(l);
+                        }}
+                        onUpdateLocation={async (id, l) => {
+                            if(isDemoMode) setLocations(prev => prev.map(x => x.id === id ? { ...x, ...l } : x));
+                            else await updateLocation(id, l);
+                        }}
+                        onDeleteLocation={async (id) => {
+                            if(isDemoMode) setLocations(prev => prev.filter(x => x.id !== id));
+                            else await deleteLocation(id);
+                        }}
+                        features={features} 
+                      />
+                    ) : <Navigate to="/" />
+                  } />
+
+                  {/* Customers */}
+                  <Route path="/customers" element={
+                    features.enableCustomerDatabase ? (
+                      <CustomerPage 
+                        customers={customers} 
+                        onAddCustomer={addCustomer} 
+                        onUpdateCustomer={updateCustomer} 
+                        onDeleteCustomer={deleteCustomer} 
+                        features={features} 
+                      />
+                    ) : <Navigate to="/" />
+                  } />
+
+                  {/* Admin */}
+                  <Route path="/admin" element={
+                    <AdminPage 
                         features={features}
                         userProfile={userProfile}
                         onUpdateLicense={async (s) => {
@@ -284,103 +421,28 @@ const App: React.FC = () => {
                             await updateOrganizationLicense(orgId, { modules: { ...features, ...s } });
                         }}
                     />
-                ) : currentView === 'crew' && features.enableCrewManagement ? (
-                    <CrewManager crewRoster={crewRoster} flights={flights} routes={routes} onAdd={addCrewMember} onUpdate={updateCrewMember} features={features} />
-                ) : currentView === 'fleet' && features.enableFleetManagement ? (
-                    <FleetManager fleet={fleet} flights={flights} onAdd={addAircraft} onUpdate={updateAircraft} features={features} />
-                ) : currentView === 'planning' && features.enableFlightPlanning ? (
-                    <FlightPlanning 
-                      currentDate={currentDate} 
-                      onDateChange={setCurrentDate} 
-                      flights={flights} 
-                      fleet={fleet} 
-                      crew={crewRoster} 
-                      routes={routes} 
-                      customers={customers} 
-                      onAddFlight={addFlight} 
-                      onUpdateFlight={updateFlight} 
-                      onDeleteFlight={deleteFlight} 
-                    />
-                ) : currentView === 'dispatch' ? (
-                    <DispatchManager 
-                      flights={flights} 
-                      fleet={fleet} 
-                      crew={crewRoster} 
-                      currentDate={currentDate} 
-                      isEnabled={features.enableDispatch} 
-                      onDateChange={setCurrentDate} 
-                      features={features} // <--- CRITICAL FIX: Passing features to prevent crash
-                    />
-                ) : currentView === 'voyage' ? (
-                    <VoyageReportManager 
-                      flights={flights} 
-                      fleet={fleet} // <--- ADDED: fleet prop
-                      crew={crewRoster} 
-                      currentDate={currentDate} 
-                      isEnabled={features.enableVoyageReports} 
-                      onDateChange={setCurrentDate} 
-                    />
-                ) : currentView === 'training' ? (
-                    <TrainingManager crew={crewRoster} features={features} onAddRecord={addTrainingRecord} onUpdateRecord={updateTrainingRecord} onDeleteRecord={deleteTrainingRecord} onAddEvent={addTrainingEvent} onUpdateEvent={updateTrainingEvent} onDeleteEvent={deleteTrainingEvent} />
-                ) : currentView === 'routes' ? (
-                    <RouteManager 
-                      routes={routes} 
-                      locations={locations}
-                      onAddRoute={addRoute} 
-                      onUpdateRoute={updateRoute} 
-                      onDeleteRoute={deleteRoute} 
-                      onAddLocation={async (l) => {
-                          if(isDemoMode) setLocations(prev => [...prev, { ...l, id: `demo-${Date.now()}` }]);
-                          else await addLocation(l);
-                      }}
-                      onUpdateLocation={async (id, l) => {
-                          if(isDemoMode) setLocations(prev => prev.map(x => x.id === id ? { ...x, ...l } : x));
-                          else await updateLocation(id, l);
-                      }}
-                      onDeleteLocation={async (id) => {
-                          if(isDemoMode) setLocations(prev => prev.filter(x => x.id !== id));
-                          else await deleteLocation(id);
-                      }}
-                      features={features} 
-                    />
-                ) : currentView === 'customers' ? (
-                    <CustomerManager customers={customers} onAddCustomer={addCustomer} onUpdateCustomer={updateCustomer} onDeleteCustomer={deleteCustomer} features={features} />
-                ) : (
-                    <div className="relative min-h-full bg-slate-50">
-                        <div className="absolute top-0 left-0 w-full h-80 bg-slate-900 overflow-hidden"><div className="absolute inset-0 bg-gradient-to-br from-blue-900/40 to-slate-900 z-10"/></div>
-                        <div className="relative z-20 max-w-7xl mx-auto px-4 lg:px-8 pt-8 pb-24">
-                            <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8 text-white">
-                                <div className="animate-in slide-in-from-left-2 duration-500"><h1 className="text-3xl lg:text-4xl font-black text-white tracking-tight leading-tight">Daily Operations<br/>Dashboard</h1></div>
-                                <div className="hidden lg:block animate-in slide-in-from-right-2 duration-500"><DigitalClock /></div>
-                            </header>
-                            <div className="bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-xl shadow-slate-900/5 border border-white/20 mb-10 flex flex-col md:flex-row items-center justify-between gap-4">
-                                <div className="flex bg-slate-100/80 p-1.5 rounded-xl"><button className="px-6 py-2.5 bg-white rounded-lg shadow-sm text-slate-900 font-bold text-sm">Flight Board</button></div>
-                                <div className="w-full md:w-auto flex justify-end"><CalendarWidget selectedDate={currentDate} onDateSelect={setCurrentDate} /></div>
-                            </div>
-                            <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 delay-200"><StatsCards stats={stats} /></div>
-                            <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 delay-300">
-                                <div className="flex items-center justify-between px-2 mb-4"><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">Live Schedule</h3></div>
-                                <FlightTable flights={filteredFlights} readOnly={true} onStatusUpdate={handleStatusUpdate} />
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </ErrorBoundary>
-        </Suspense>
-      </main>
+                  } />
 
-      <FlightModal 
-        isOpen={isFlightModalOpen} 
-        onClose={() => setIsFlightModalOpen(false)} 
-        onSave={handleSaveFlight} 
-        editingFlight={editingFlight} 
-        fleet={fleet} 
-        crew={crewRoster} 
-        customers={customers} 
-        flights={flights} 
-        features={features} 
-      />
-    </div>
+                  {/* Fallback */}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </ErrorBoundary>
+          </Suspense>
+        </main>
+
+        <FlightModal 
+          isOpen={isFlightModalOpen} 
+          onClose={() => setIsFlightModalOpen(false)} 
+          onSave={handleSaveFlight} 
+          editingFlight={editingFlight} 
+          fleet={fleet} 
+          crew={crewRoster} 
+          customers={customers} 
+          flights={flights} 
+          features={features} 
+        />
+      </div>
+    </Router>
   );
 };
 
