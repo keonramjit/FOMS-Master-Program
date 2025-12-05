@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { RouteDefinition, LocationDefinition, SystemSettings } from '../types';
 import { Trash2, Plus, Edit2, Save, MapPin, Upload, FileSpreadsheet, Loader2, Search, ChevronLeft, ChevronRight, ArrowRight, Route, Globe, Lock } from 'lucide-react';
 import { FeatureGate } from './FeatureGate';
+import { decimalToHm, hmToDecimal } from '../utils/calculations';
 
 interface RouteManagerProps {
   routes: RouteDefinition[];
@@ -46,25 +48,6 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
   const [itemsPerLocationPage, setItemsPerLocationPage] = useState(10);
 
   // -- Helpers --
-
-  const decimalToHm = (val?: number) => {
-    if (val === undefined || val === null || isNaN(val)) return '';
-    const hrs = Math.floor(val);
-    const mins = Math.round((val - hrs) * 60);
-    const minsStr = mins.toString().padStart(2, '0');
-    return `${hrs}:${minsStr}`;
-  };
-
-  const hmToDecimal = (str: string | undefined): number => {
-    if (!str) return 0;
-    if (str.includes(':')) {
-        const [h, m] = str.split(':').map(Number);
-        const hours = isNaN(h) ? 0 : h;
-        const minutes = isNaN(m) ? 0 : m;
-        return hours + (minutes / 60);
-    }
-    return parseFloat(str) || 0;
-  };
 
   const calculateDefaultsFromDistance = (distance: number) => {
       if (!distance || distance <= 0) return null;

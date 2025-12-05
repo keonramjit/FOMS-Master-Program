@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Flight, CrewMember, Aircraft, SystemSettings } from '../types';
 import { BookOpen, Calendar, Save, Plane, CheckCircle2, RotateCcw, ArrowRight, Clock, User, AlertCircle } from 'lucide-react';
 import { FeatureGate } from './FeatureGate';
 import { CalendarWidget } from './CalendarWidget';
 import { updateFlight } from '../services/firebase';
+import { calculateDuration } from '../utils/calculations';
 
 interface VoyageReportManagerProps {
   flights: Flight[];
@@ -64,18 +66,7 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
         .sort((a, b) => (a.etd || '').localeCompare(b.etd || ''));
   }, [flights, currentDate, selectedAircraftReg]);
 
-  // --- Calculation Helpers ---
-
-  const calculateDuration = (start: string, end: string): number => {
-    if (!start || !end) return 0;
-    const [h1, m1] = start.split(':').map(Number);
-    const [h2, m2] = end.split(':').map(Number);
-    if (isNaN(h1) || isNaN(m1) || isNaN(h2) || isNaN(m2)) return 0;
-    
-    let diff = (h2 * 60 + m2) - (h1 * 60 + m1);
-    if (diff < 0) diff += 24 * 60; // Handle midnight crossing
-    return parseFloat((diff / 60).toFixed(2));
-  };
+  // --- Handlers ---
 
   const handleEdit = (flightId: string, field: keyof FlightEditState, value: string) => {
       setEdits(prev => ({

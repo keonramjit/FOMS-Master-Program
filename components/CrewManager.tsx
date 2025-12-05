@@ -1,8 +1,10 @@
+
 import React, { useState, useEffect } from 'react';
 import { CrewMember, Flight, RouteDefinition, SystemSettings } from '../types';
 import { Plus, Search, Edit2, User, Shield, Briefcase, X, Save, BarChart, FileCheck, Users, AlertTriangle, CheckSquare, Square, Map, Clock, Lock, Loader2 } from 'lucide-react';
 import { FeatureGate } from './FeatureGate';
 import { fetchFlightHistory } from '../services/firebase';
+import { calculateFDP } from '../utils/calculations';
 
 interface CrewManagerProps {
   crewRoster: (CrewMember & { _docId?: string })[];
@@ -126,53 +128,6 @@ export const CrewManager: React.FC<CrewManagerProps> = ({ crewRoster, flights, r
         onUpdate(editingMember._docId, { allowedAirports: Array.from(selectedStrips) });
         setIsStripsModalOpen(false);
     }
-  };
-
-  // --- FDP Calculation Helpers ---
-
-  const calculateFDP = (memberCode: string) => {
-    // Determine which dataset to use (history if loaded, else fallback to current flights for basic display)
-    const dataset = historyFlights.length > 0 ? historyFlights : flights;
-    
-    const today = new Date();
-    // Reset times to compare dates properly
-    const todayStr = today.toISOString().split('T')[0];
-    
-    // Weekly (Last 7 days)
-    const weekAgo = new Date(today);
-    weekAgo.setDate(today.getDate() - 7);
-
-    // Monthly (Current Month)
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-
-    let daily = 0;
-    let weekly = 0;
-    let monthly = 0;
-
-    dataset.forEach(f => {
-        if (!f.flightTime) return;
-        // Check participation
-        if (f.pic === memberCode || f.sic === memberCode) {
-            const fDate = new Date(f.date);
-            
-            // Daily
-            if (f.date === todayStr) {
-                daily += f.flightTime;
-            }
-            
-            // Weekly
-            if (fDate >= weekAgo && fDate <= today) {
-                weekly += f.flightTime;
-            }
-            
-            // Monthly
-            if (fDate >= startOfMonth && fDate <= today) {
-                monthly += f.flightTime;
-            }
-        }
-    });
-
-    return { daily, weekly, monthly };
   };
 
   // --- Style Helpers ---
@@ -347,7 +302,10 @@ export const CrewManager: React.FC<CrewManagerProps> = ({ crewRoster, flights, r
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {filteredCrew.filter(c => !c.role?.includes('Cabin')).map(pilot => {
-                                    const fdp = calculateFDP(pilot.code);
+                                    // Use util function
+                                    const dataset = historyFlights.length > 0 ? historyFlights : flights;
+                                    const fdp = calculateFDP(dataset, pilot.code);
+                                    
                                     return (
                                         <tr key={pilot.code} className="hover:bg-slate-50/50">
                                             <td className="px-6 py-4">
