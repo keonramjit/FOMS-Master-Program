@@ -1,18 +1,20 @@
 
 import React from 'react';
 import { DispatchManager } from '../components/DispatchManager';
-import { Flight, Aircraft, CrewMember, SystemSettings } from '../types';
+import { useAppData } from '../context/DataContext';
 
-interface DispatchPageProps {
-  flights: Flight[];
-  fleet: Aircraft[];
-  crew: (CrewMember & { _docId?: string })[];
-  currentDate: string;
-  isEnabled: boolean;
-  onDateChange: (date: string) => void;
-  features: SystemSettings;
-}
+export const DispatchPage: React.FC = () => {
+  const { flights, fleet, crew, currentDate, features, setCurrentDate } = useAppData();
 
-export const DispatchPage: React.FC<DispatchPageProps> = (props) => {
-  return <DispatchManager {...props} />;
+  return (
+    <DispatchManager 
+        flights={flights} 
+        fleet={fleet} 
+        crew={crew} 
+        currentDate={currentDate} 
+        isEnabled={features.enableDispatch} 
+        onDateChange={setCurrentDate} 
+        features={features} 
+    />
+  );
 };

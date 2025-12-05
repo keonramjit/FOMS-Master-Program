@@ -1,14 +1,16 @@
 
 import React from 'react';
 import { SubscriptionManagement } from '../components/SubscriptionManagement';
-import { SystemSettings, UserProfile } from '../types';
+import { useAppData } from '../context/DataContext';
 
-interface AdminPageProps {
-  features: SystemSettings;
-  userProfile: UserProfile | null;
-  onUpdateLicense: (settings: Partial<SystemSettings>) => Promise<void>;
-}
+export const AdminPage: React.FC = () => {
+  const { features, userProfile, updateLicense } = useAppData();
 
-export const AdminPage: React.FC<AdminPageProps> = (props) => {
-  return <SubscriptionManagement {...props} />;
+  return (
+    <SubscriptionManagement 
+        features={features}
+        userProfile={userProfile}
+        onUpdateLicense={updateLicense}
+    />
+  );
 };

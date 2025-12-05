@@ -1,17 +1,19 @@
 
 import React from 'react';
 import { CrewManager } from '../components/CrewManager';
-import { CrewMember, Flight, RouteDefinition, SystemSettings } from '../types';
+import { useAppData } from '../context/DataContext';
 
-interface CrewPageProps {
-  crewRoster: (CrewMember & { _docId?: string })[];
-  flights: Flight[];
-  routes: RouteDefinition[];
-  onAdd: (member: CrewMember) => void;
-  onUpdate: (docId: string, member: Partial<CrewMember>) => void;
-  features: SystemSettings;
-}
+export const CrewPage: React.FC = () => {
+  const { crew, flights, routes, addCrew, updateCrew, features } = useAppData();
 
-export const CrewPage: React.FC<CrewPageProps> = (props) => {
-  return <CrewManager {...props} />;
+  return (
+    <CrewManager 
+        crewRoster={crew} 
+        flights={flights} 
+        routes={routes} 
+        onAdd={addCrew} 
+        onUpdate={updateCrew} 
+        features={features} 
+    />
+  );
 };

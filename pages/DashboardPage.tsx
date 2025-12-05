@@ -4,23 +4,16 @@ import { DigitalClock } from '../components/DigitalClock';
 import { CalendarWidget } from '../components/CalendarWidget';
 import { StatsCards } from '../components/StatsCards';
 import { FlightTable } from '../components/FlightTable';
-import { OperationsStats, Flight, FlightStatus } from '../types';
+import { FlightStatus } from '../types';
+import { useAppData } from '../context/DataContext';
 
-interface DashboardPageProps {
-  currentDate: string;
-  onDateChange: (date: string) => void;
-  stats: OperationsStats;
-  filteredFlights: Flight[];
-  onStatusUpdate: (id: string, status: FlightStatus) => void;
-}
+export const DashboardPage: React.FC = () => {
+  const { currentDate, setCurrentDate, stats, filteredFlights, updateFlight } = useAppData();
 
-export const DashboardPage: React.FC<DashboardPageProps> = ({
-  currentDate,
-  onDateChange,
-  stats,
-  filteredFlights,
-  onStatusUpdate
-}) => {
+  const handleStatusUpdate = async (id: string, status: FlightStatus) => {
+    await updateFlight(id, { status });
+  };
+
   return (
     <div className="relative min-h-full bg-slate-50">
       <div className="absolute top-0 left-0 w-full h-80 bg-slate-900 overflow-hidden">
@@ -45,7 +38,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </button>
           </div>
           <div className="w-full md:w-auto flex justify-end">
-            <CalendarWidget selectedDate={currentDate} onDateSelect={onDateChange} />
+            <CalendarWidget selectedDate={currentDate} onDateSelect={setCurrentDate} />
           </div>
         </div>
 
@@ -62,7 +55,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <FlightTable 
             flights={filteredFlights} 
             readOnly={true} 
-            onStatusUpdate={onStatusUpdate} 
+            onStatusUpdate={handleStatusUpdate} 
           />
         </div>
       </div>

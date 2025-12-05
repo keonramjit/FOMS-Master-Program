@@ -1,16 +1,18 @@
 
 import React from 'react';
 import { FleetManager } from '../components/FleetManager';
-import { Aircraft, Flight, SystemSettings } from '../types';
+import { useAppData } from '../context/DataContext';
 
-interface FleetPageProps {
-  fleet: (Aircraft & { _docId?: string })[];
-  flights: Flight[];
-  onAdd: (aircraft: Aircraft) => void;
-  onUpdate: (docId: string, updates: Partial<Aircraft>) => void;
-  features: SystemSettings;
-}
+export const FleetPage: React.FC = () => {
+  const { fleet, flights, addAircraft, updateAircraft, features } = useAppData();
 
-export const FleetPage: React.FC<FleetPageProps> = (props) => {
-  return <FleetManager {...props} />;
+  return (
+    <FleetManager 
+        fleet={fleet} 
+        flights={flights} 
+        onAdd={addAircraft} 
+        onUpdate={updateAircraft} 
+        features={features} 
+    />
+  );
 };

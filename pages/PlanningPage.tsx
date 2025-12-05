@@ -1,21 +1,26 @@
 
 import React from 'react';
 import { FlightPlanning } from '../components/FlightPlanning';
-import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition } from '../types';
+import { useAppData } from '../context/DataContext';
 
-interface PlanningPageProps {
-  currentDate: string;
-  onDateChange: (date: string) => void;
-  flights: Flight[];
-  fleet: (Aircraft & { _docId?: string })[];
-  crew: (CrewMember & { _docId?: string })[];
-  routes: RouteDefinition[];
-  customers: CustomerDefinition[];
-  onAddFlight: (flight: Omit<Flight, 'id'>) => Promise<void>;
-  onUpdateFlight: (id: string, updates: Partial<Flight>) => Promise<void>;
-  onDeleteFlight: (id: string) => Promise<void>;
-}
+export const PlanningPage: React.FC = () => {
+  const { 
+    currentDate, setCurrentDate, flights, fleet, crew, routes, customers,
+    addFlight, updateFlight, deleteFlight 
+  } = useAppData();
 
-export const PlanningPage: React.FC<PlanningPageProps> = (props) => {
-  return <FlightPlanning {...props} />;
+  return (
+    <FlightPlanning
+      currentDate={currentDate}
+      onDateChange={setCurrentDate}
+      flights={flights}
+      fleet={fleet}
+      crew={crew}
+      routes={routes}
+      customers={customers}
+      onAddFlight={addFlight}
+      onUpdateFlight={updateFlight}
+      onDeleteFlight={deleteFlight}
+    />
+  );
 };

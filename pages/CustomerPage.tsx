@@ -1,16 +1,18 @@
 
 import React from 'react';
 import { CustomerManager } from '../components/CustomerManager';
-import { CustomerDefinition, SystemSettings } from '../types';
+import { useAppData } from '../context/DataContext';
 
-interface CustomerPageProps {
-  customers: CustomerDefinition[];
-  onAddCustomer: (customer: Omit<CustomerDefinition, 'id'>) => Promise<void>;
-  onUpdateCustomer: (id: string, customer: Partial<CustomerDefinition>) => Promise<void>;
-  onDeleteCustomer: (id: string) => Promise<void>;
-  features: SystemSettings;
-}
+export const CustomerPage: React.FC = () => {
+  const { customers, features, addCustomer, updateCustomer, deleteCustomer } = useAppData();
 
-export const CustomerPage: React.FC<CustomerPageProps> = (props) => {
-  return <CustomerManager {...props} />;
+  return (
+    <CustomerManager 
+        customers={customers} 
+        onAddCustomer={addCustomer} 
+        onUpdateCustomer={updateCustomer} 
+        onDeleteCustomer={deleteCustomer} 
+        features={features} 
+    />
+  );
 };
