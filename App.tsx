@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { StatsCards } from './components/StatsCards';
@@ -280,7 +281,7 @@ const App: React.FC = () => {
                         userProfile={userProfile}
                         onUpdateLicense={async (s) => {
                             const orgId = userProfile?.orgId || 'trans_guyana';
-                            await updateOrganizationLicense(orgId, { ...features, ...s });
+                            await updateOrganizationLicense(orgId, { modules: { ...features, ...s } });
                         }}
                     />
                 ) : currentView === 'crew' && features.enableCrewManagement ? (
@@ -311,7 +312,14 @@ const App: React.FC = () => {
                       features={features} // <--- CRITICAL FIX: Passing features to prevent crash
                     />
                 ) : currentView === 'voyage' ? (
-                    <VoyageReportManager flights={flights} crew={crewRoster} currentDate={currentDate} isEnabled={features.enableVoyageReports} onDateChange={setCurrentDate} />
+                    <VoyageReportManager 
+                      flights={flights} 
+                      fleet={fleet} // <--- ADDED: fleet prop
+                      crew={crewRoster} 
+                      currentDate={currentDate} 
+                      isEnabled={features.enableVoyageReports} 
+                      onDateChange={setCurrentDate} 
+                    />
                 ) : currentView === 'training' ? (
                     <TrainingManager crew={crewRoster} features={features} onAddRecord={addTrainingRecord} onUpdateRecord={updateTrainingRecord} onDeleteRecord={deleteTrainingRecord} onAddEvent={addTrainingEvent} onUpdateEvent={updateTrainingEvent} onDeleteEvent={deleteTrainingEvent} />
                 ) : currentView === 'routes' ? (

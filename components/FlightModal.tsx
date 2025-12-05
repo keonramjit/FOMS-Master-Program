@@ -94,7 +94,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                   if (relevantTypes.includes(r.type)) {
                       const expiry = new Date(r.expiryDate);
                       if (expiry < today) {
-                          newWarnings.push(`EXPIRED: ${doc.type} (${doc.expiryDate})`);
+                          newWarnings.push(`EXPIRED: ${r.type} (${r.expiryDate})`);
                       }
                   }
               });
@@ -173,7 +173,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         // Convert Zod errors to a simple object for UI
         const formattedErrors: Record<string, string> = {};
         validationResult.error.issues.forEach(issue => {
-            formattedErrors[issue.path[0]] = issue.message;
+            formattedErrors[String(issue.path[0])] = issue.message;
         });
         setValidationErrors(formattedErrors);
         return; // STOP HERE if invalid

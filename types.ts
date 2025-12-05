@@ -22,14 +22,15 @@ export type FlightStatus = 'Scheduled' | 'Delayed' | 'Completed' | 'Cancelled' |
 
 export interface Flight {
   id: string;
+  order?: number; // Visual sorting index
   parentId?: string; // ID of the parent flight if this is a segment
   flightNumber: string;
   route: string;
   aircraftRegistration: string;
   aircraftType: string;
   etd: string; // Estimated Time of Departure (HH:mm)
-  flightTime?: number; // Duration in hours
-  commercialTime?: string; // Commercial Time / Crew Time (HH:mm)
+  flightTime?: number; // Planned Duration in hours
+  commercialTime?: string; // Planned Commercial Time (HH:mm)
   pic: string; // Pilot in Command Code
   sic: string; // Second in Command Code (optional)
   customer: string;
@@ -37,6 +38,15 @@ export interface Flight {
   status: FlightStatus;
   notes?: string;
   date: string; // ISO String YYYY-MM-DD
+
+  // --- Journey Log Actuals (New) ---
+  outTime?: string;  // HH:MM
+  offTime?: string;  // HH:MM
+  onTime?: string;   // HH:MM
+  inTime?: string;   // HH:MM
+  actualBlockTime?: number;  // Decimal Hours (In - Out)
+  actualFlightTime?: number; // Decimal Hours (On - Off)
+  voyageReportStatus?: 'Pending' | 'Filed'; // Tracking status
 }
 
 export interface RouteDefinition {
@@ -191,21 +201,33 @@ export interface OpsPlanData {
 
 export interface NotocItem {
     id: string;
-    unNumber: string;
+    stationOfUnloading?: string;
+    airWaybillNumber?: string;
     properShippingName: string;
-    classDivision: string;
-    packingGroup: string;
+    classDivision: string; // DG Class
+    unNumber: string;
+    subRisk?: string;
     noOfPackages: number;
     netQuantity: string;
-    location?: string;
+    packingInst?: string; // "lacking list" / Packing Inst
+    packingGroup?: string;
+    code?: string;
+    cao?: boolean; // CAO (X)
+    ergCode?: string;
+    location?: string; // Position
 }
 
 export interface SpecialLoadItem {
     id: string;
-    description: string;
-    weight: number;
-    loadingPosition: string;
-    instructions: string;
+    stationOfUnloading?: string;
+    airWaybillNumber?: string;
+    description: string; // Contents and description
+    noOfPackages?: number; // Number of Packing
+    quantity?: string; // Qty
+    supplementaryInfo?: string; // Supplementary Information
+    code?: string; // Code (see reverse)
+    uldId?: string; // ULD ID
+    loadingPosition?: string; // Position
 }
 
 export interface NotocData {

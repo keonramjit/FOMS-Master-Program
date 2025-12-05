@@ -1,44 +1,71 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Flight, CrewMember, SystemSettings, VoyageReport, VoyageEntry } from '../types';
-import { BookOpen, User, Calendar, Save, Calculator, Clock, MapPin, Plane, AlertCircle, ArrowRight } from 'lucide-react';
+import { Flight, CrewMember, Aircraft, SystemSettings } from '../types';
+import { BookOpen, Calendar, Save, Plane, CheckCircle2, RotateCcw, ArrowRight, Clock, User, AlertCircle } from 'lucide-react';
 import { FeatureGate } from './FeatureGate';
 import { CalendarWidget } from './CalendarWidget';
+import { updateFlight } from '../services/firebase';
 
 interface VoyageReportManagerProps {
   flights: Flight[];
+  fleet: Aircraft[];
   crew: (CrewMember & { _docId?: string })[];
   currentDate: string;
   isEnabled: boolean;
   onDateChange: (date: string) => void;
 }
 
-export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flights, crew, currentDate, isEnabled, onDateChange }) => {
-  const [selectedPilot, setSelectedPilot] = useState<string>('');
-  
-  // Note: We use currentDate from props as the source of truth for the date selection.
-  // The CalendarWidget will update the global app state via onDateChange.
-  
-  const [report, setReport] = useState<VoyageReport | null>(null);
+// Local state interface for editing
+interface FlightEditState {
+    outTime: string;
+    offTime: string;
+    onTime: string;
+    inTime: string;
+    notes: string;
+}
 
-  // Smart Filter: Only show pilots scheduled for the selected date
-  const activeCrewForDay = useMemo(() => {
-      // 1. Get all flights for the selected date
-      const daysFlights = flights.filter(f => f.date === currentDate);
-      
-      // 2. Extract unique crew codes (PIC and SIC)
-      const activeCodes = new Set<string>();
-      daysFlights.forEach(f => {
-          if (f.pic) activeCodes.add(f.pic);
-          if (f.sic) activeCodes.add(f.sic);
+export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flights, fleet, crew, currentDate, isEnabled, onDateChange }) => {
+  const [selectedAircraftReg, setSelectedAircraftReg] = useState<string>('');
+  const [edits, setEdits] = useState<Record<string, FlightEditState>>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Initialize edits when flights change or aircraft selected
+  useEffect(() => {
+      const newEdits: Record<string, FlightEditState> = {};
+      flights.forEach(f => {
+          newEdits[f.id] = {
+              outTime: f.outTime || '',
+              offTime: f.offTime || '',
+              onTime: f.onTime || '',
+              inTime: f.inTime || '',
+              notes: f.notes || ''
+          };
       });
+      setEdits(prev => ({ ...prev, ...newEdits }));
+  }, [flights]);
 
-      // 3. Filter the full crew roster against these codes
-      return crew
-        .filter(c => activeCodes.has(c.code))
-        .sort((a, b) => a.name.localeCompare(b.name));
-  }, [flights, crew, currentDate]);
+  // Filter fleet to only show aircraft active on the selected date
+  const activeFleet = useMemo(() => {
+      const activeRegs = new Set(
+          flights
+              .filter(f => f.date === currentDate)
+              .map(f => f.aircraftRegistration)
+      );
+      
+      return fleet
+        .filter(ac => activeRegs.has(ac.registration))
+        .sort((a, b) => a.registration.localeCompare(b.registration));
+  }, [fleet, flights, currentDate]);
 
-  // Calculate Duration Helper (HH:MM -> Decimal Hours)
+  // Filter flights for the selected aircraft and date
+  const aircraftFlights = useMemo(() => {
+      return flights
+        .filter(f => f.date === currentDate && f.aircraftRegistration === selectedAircraftReg)
+        .sort((a, b) => (a.etd || '').localeCompare(b.etd || ''));
+  }, [flights, currentDate, selectedAircraftReg]);
+
+  // --- Calculation Helpers ---
+
   const calculateDuration = (start: string, end: string): number => {
     if (!start || !end) return 0;
     const [h1, m1] = start.split(':').map(Number);
@@ -50,326 +77,296 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
     return parseFloat((diff / 60).toFixed(2));
   };
 
-  const handlePilotChange = (pilotCode: string) => {
-    setSelectedPilot(pilotCode);
-    if (pilotCode && currentDate) {
-        initializeReport(pilotCode, currentDate);
-    }
+  const handleEdit = (flightId: string, field: keyof FlightEditState, value: string) => {
+      setEdits(prev => ({
+          ...prev,
+          [flightId]: {
+              ...prev[flightId],
+              [field]: value
+          }
+      }));
+      setSaveSuccess(false);
   };
 
-  const handleDateChange = (date: string) => {
-    onDateChange(date); // Sync Global State
-    setSelectedPilot(''); // Reset selection when changing days to prevent mismatch
-    setReport(null);
-  };
+  const handleSave = async () => {
+      setIsSaving(true);
+      try {
+          const promises = aircraftFlights.map(f => {
+              const edit = edits[f.id];
+              if (!edit) return Promise.resolve();
 
-  const initializeReport = (pilotCode: string, date: string) => {
-    // 1. Find flights for this pilot on this date
-    const pilotFlights = flights.filter(f => 
-        f.date === date && (f.pic === pilotCode || f.sic === pilotCode)
-    ).sort((a,b) => (a.etd || '').localeCompare(b.etd || ''));
+              // Calculate finals
+              const actualFlightTime = calculateDuration(edit.offTime, edit.onTime);
+              const actualBlockTime = calculateDuration(edit.outTime, edit.inTime);
 
-    // 2. Map to entries
-    const entries: VoyageEntry[] = pilotFlights.map(f => {
-        const routeParts = f.route.split('-');
-        return {
-            id: f.id,
-            flightId: f.id,
-            flightNumber: f.flightNumber,
-            aircraftReg: f.aircraftRegistration,
-            from: routeParts[0] || '',
-            to: routeParts[1] || '',
-            outTime: '', 
-            offTime: '',
-            onTime: '',
-            inTime: '',
-            blockTime: 0,
-            flightTime: 0,
-            dayLandings: 0,
-            nightLandings: 0,
-            approaches: { ils: 0, rnav: 0, loc: 0, vor: 0, visual: 0 }
-        };
-    });
-
-    setReport({
-        id: `${date}-${pilotCode}`,
-        date: date,
-        crewCode: pilotCode,
-        status: 'Open',
-        entries: entries
-    });
-  };
-
-  const updateEntry = (entryId: string, field: keyof VoyageEntry, value: any) => {
-    setReport(prev => {
-        if (!prev) return null;
-        const newEntries = prev.entries.map(e => {
-            if (e.id === entryId) {
-                const updated = { ...e, [field]: value };
-                
-                // Auto Calculate Times
-                if (['outTime', 'inTime'].includes(field as string)) {
-                    updated.blockTime = calculateDuration(updated.outTime, updated.inTime);
-                }
-                if (['offTime', 'onTime'].includes(field as string)) {
-                    updated.flightTime = calculateDuration(updated.offTime, updated.onTime);
-                }
-                
-                return updated;
-            }
-            return e;
-        });
-        return { ...prev, entries: newEntries };
-    });
-  };
-
-  const updateApproach = (entryId: string, type: keyof VoyageEntry['approaches'], val: number) => {
-      setReport(prev => {
-          if (!prev) return null;
-          const newEntries = prev.entries.map(e => {
-              if (e.id === entryId) {
-                  return { 
-                      ...e, 
-                      approaches: { ...e.approaches, [type]: val } 
-                  };
-              }
-              return e;
+              // Update fields
+              return updateFlight(f.id, {
+                  outTime: edit.outTime,
+                  offTime: edit.offTime,
+                  onTime: edit.onTime,
+                  inTime: edit.inTime,
+                  notes: edit.notes,
+                  actualFlightTime: actualFlightTime > 0 ? actualFlightTime : undefined,
+                  actualBlockTime: actualBlockTime > 0 ? actualBlockTime : undefined,
+                  status: (edit.inTime && edit.onTime) ? 'Completed' : f.status
+              });
           });
-          return { ...prev, entries: newEntries };
-      });
+
+          await Promise.all(promises);
+          setSaveSuccess(true);
+          setTimeout(() => setSaveSuccess(false), 3000);
+      } catch (error) {
+          console.error("Failed to save journey log", error);
+          alert("Failed to save changes. Please try again.");
+      } finally {
+          setIsSaving(false);
+      }
   };
 
-  // Totals
-  const totalBlock = report?.entries.reduce((acc, e) => acc + e.blockTime, 0) || 0;
-  const totalFlight = report?.entries.reduce((acc, e) => acc + e.flightTime, 0) || 0;
-  const totalDayLdgs = report?.entries.reduce((acc, e) => acc + e.dayLandings, 0) || 0;
-  const totalNightLdgs = report?.entries.reduce((acc, e) => acc + e.nightLandings, 0) || 0;
-
-  // Styles
-  const inputBase = "w-full bg-white border border-slate-200 text-slate-900 text-sm rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 block px-1 py-1.5 text-center font-mono transition-all shadow-sm hover:border-slate-300";
-  const timeInputClass = `${inputBase} placeholder:text-slate-300 font-bold`;
-  const numberInputClass = `${inputBase} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none font-bold`;
-  const smallLabelClass = "text-[9px] font-bold text-slate-400 uppercase text-center block mb-0.5";
-  const thClass = "px-2 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50 border-b border-slate-200 text-center whitespace-nowrap align-bottom";
+  // --- Styles ---
+  const inputCellClass = "p-1 border-r border-slate-100 last:border-r-0";
+  const inputClass = "w-full text-center font-mono font-bold text-sm bg-transparent border border-transparent rounded focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all py-2 text-slate-700 placeholder:text-slate-200 hover:bg-slate-50";
+  const calcCellClass = "px-2 py-3 text-center font-mono font-bold text-sm border-r border-white/50";
+  const superHeaderClass = "px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center border-l border-slate-200 first:border-l-0 bg-slate-50/80";
+  const subHeaderClass = "px-2 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide text-center border-t border-slate-200";
 
   return (
     <FeatureGate isEnabled={isEnabled}>
         <div className="flex h-full bg-slate-50 relative overflow-hidden flex-col md:flex-row">
+            
             {/* Sidebar Selection */}
-            <div className="w-full md:w-80 bg-white border-r border-slate-200 p-5 flex flex-col gap-6 shadow-sm z-10 shrink-0">
-                <div>
+            <div className="w-full md:w-72 bg-white border-r border-slate-200 p-0 flex flex-col shadow-sm z-10 shrink-0">
+                <div className="p-5 border-b border-slate-100">
                     <h2 className="font-bold text-lg text-slate-900 flex items-center gap-2 mb-1">
                         <BookOpen className="text-blue-600" size={20} />
-                        Voyage Report
+                        Journey Log
                     </h2>
-                    <p className="text-xs text-slate-500">Daily Flight Logbook</p>
+                    <p className="text-xs text-slate-500 mb-4">Daily Flight Records</p>
+                    <CalendarWidget selectedDate={currentDate} onDateSelect={(d) => { onDateChange(d); setSelectedAircraftReg(''); }} />
                 </div>
 
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Operation Date</label>
-                    <div className="w-full">
-                        <CalendarWidget selectedDate={currentDate} onDateSelect={handleDateChange} />
-                    </div>
-                </div>
-
-                <div className="flex-1 flex flex-col min-h-0">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex justify-between">
-                        <span>Scheduled Crew</span>
-                        <span className="bg-slate-100 text-slate-600 px-1.5 rounded text-[10px]">{activeCrewForDay.length} Active</span>
-                    </label>
-                    
-                    <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-2">
-                        {activeCrewForDay.length === 0 ? (
-                            <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                                <AlertCircle className="mx-auto text-slate-300 mb-2" size={24} />
-                                <p className="text-xs text-slate-500 font-medium">No flights found for this date.</p>
-                            </div>
-                        ) : (
-                            activeCrewForDay.map(p => (
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+                    <div className="px-2 py-1 text-xs font-bold text-slate-400 uppercase tracking-wider">Active Fleet</div>
+                    {activeFleet.length === 0 ? (
+                        <div className="p-4 text-center text-slate-400 text-xs italic bg-slate-50 rounded-lg border border-slate-100 mx-2">
+                            <AlertCircle size={16} className="mx-auto mb-2 opacity-50"/>
+                            No aircraft active on this date.
+                        </div>
+                    ) : (
+                        activeFleet.map(ac => {
+                            const isSelected = selectedAircraftReg === ac.registration;
+                            
+                            return (
                                 <button
-                                    key={p.code}
-                                    onClick={() => handlePilotChange(p.code)}
-                                    className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${selectedPilot === p.code ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-500 shadow-sm' : 'bg-white border-slate-200 hover:border-blue-300 hover:shadow-sm'}`}
+                                    key={ac.registration}
+                                    onClick={() => setSelectedAircraftReg(ac.registration)}
+                                    className={`
+                                        w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-all group
+                                        ${isSelected 
+                                            ? 'bg-slate-900 text-white shadow-md' 
+                                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                        }
+                                    `}
                                 >
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${selectedPilot === p.code ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                                        {p.code}
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-1.5 h-1.5 rounded-full bg-emerald-500`}></div>
+                                        <span className="font-bold text-sm font-mono tracking-tight">{ac.registration}</span>
                                     </div>
-                                    <div className="min-w-0">
-                                        <div className="text-sm font-bold text-slate-900 truncate">{p.name}</div>
-                                        <div className="text-[10px] text-slate-500 font-medium truncate">{p.role}</div>
-                                    </div>
+                                    <span className={`text-[10px] font-bold ${isSelected ? 'text-slate-400' : 'text-slate-300'}`}>{ac.type}</span>
                                 </button>
-                            ))
-                        )}
-                    </div>
+                            );
+                        })
+                    )}
                 </div>
             </div>
 
             {/* Main Log Sheet */}
-            <div className="flex-1 overflow-auto p-4 md:p-8 custom-scrollbar bg-slate-50">
-                {report ? (
-                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-w-[1200px]">
-                        {/* Header */}
-                        <div className="px-6 py-5 border-b border-slate-200 flex justify-between items-center bg-white sticky top-0 z-20">
-                            <div className="flex items-center gap-10">
-                                <div>
-                                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Pilot In Command</span>
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold shadow-sm border border-slate-200">
-                                            {selectedPilot}
-                                        </div>
-                                        <div>
-                                            <span className="block text-lg font-black text-slate-800 leading-tight">
-                                                {crew.find(c => c.code === selectedPilot)?.name}
-                                            </span>
-                                            <span className="text-xs text-slate-500 font-medium">
-                                                {crew.find(c => c.code === selectedPilot)?.role}
-                                            </span>
-                                        </div>
+            <div className="flex-1 overflow-hidden flex flex-col bg-slate-50/50">
+                {selectedAircraftReg ? (
+                    <div className="flex flex-col h-full">
+                        {/* Action Header */}
+                        <div className="px-6 py-4 border-b border-slate-200 bg-white flex justify-between items-center shadow-sm z-20">
+                            <div className="flex items-center gap-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-lg shadow-slate-200">
+                                        <Plane size={20} />
+                                    </div>
+                                    <div>
+                                        <span className="block text-2xl font-black text-slate-900 leading-none tracking-tight">
+                                            {selectedAircraftReg}
+                                        </span>
+                                        <span className="text-xs font-medium text-slate-500">Log Sheet Entry</span>
                                     </div>
                                 </div>
-                                <div className="h-8 w-px bg-slate-200"></div>
-                                <div>
-                                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Date of Operation</span>
-                                    <span className="text-lg font-mono font-bold text-slate-800 flex items-center gap-2">
-                                        <Calendar size={18} className="text-blue-500" />
-                                        {new Date(currentDate).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                                    </span>
+                                <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
+                                <div className="hidden sm:block">
+                                    <span className="text-xs font-bold text-slate-400 uppercase">Date</span>
+                                    <div className="text-sm font-bold text-slate-700">{new Date(currentDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
                                 </div>
                             </div>
                             
-                            <div className="flex gap-3">
-                                <button className="px-5 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 flex items-center gap-2 text-sm shadow-lg shadow-blue-200 transition-all transform active:scale-95">
-                                    <Save size={18}/> Save Report
+                            <div className="flex gap-3 items-center">
+                                {saveSuccess && (
+                                    <span className="text-emerald-600 font-bold text-xs bg-emerald-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-emerald-100 animate-in fade-in slide-in-from-right-2">
+                                        <CheckCircle2 size={14} /> Saved
+                                    </span>
+                                )}
+                                <button 
+                                    onClick={handleSave}
+                                    disabled={isSaving}
+                                    className="px-5 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm shadow-md transition-all active:scale-95 disabled:opacity-70"
+                                >
+                                    {isSaving ? <RotateCcw size={16} className="animate-spin" /> : <Save size={16} />}
+                                    Save Log
                                 </button>
                             </div>
                         </div>
 
-                        {/* Table */}
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-slate-50 sticky top-0 z-10">
-                                    <tr>
-                                        <th className={`${thClass} text-left pl-6 w-64`}>Flight Details</th>
-                                        <th className={thClass}>Out</th>
-                                        <th className={thClass}>Off</th>
-                                        <th className={thClass}>On</th>
-                                        <th className={thClass}>In</th>
-                                        <th className={`${thClass} bg-blue-50 text-blue-700 border-b-blue-100`}>Block<br/><span className="text-[9px] opacity-70">Ramp Time</span></th>
-                                        <th className={`${thClass} bg-emerald-50 text-emerald-700 border-b-emerald-100`}>Flight<br/><span className="text-[9px] opacity-70">Air Time</span></th>
-                                        <th className={thClass} colSpan={2}>Landings<br/><span className="text-[9px] opacity-70">Day / Night</span></th>
-                                        <th className={thClass} colSpan={4}>Instrument Approaches<br/><span className="text-[9px] opacity-70">ILS / RNAV / LOC / VOR</span></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 bg-white">
-                                    {report.entries.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={13} className="py-16 text-center text-slate-400">
-                                                <div className="flex flex-col items-center">
-                                                    <Plane className="opacity-20 mb-2" size={32} />
-                                                    <p>No flights scheduled for this pilot on this date.</p>
-                                                </div>
-                                            </td>
+                        {/* Table Area */}
+                        <div className="flex-1 overflow-auto p-6 custom-scrollbar">
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden ring-1 ring-slate-900/5 min-w-[1000px]">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        {/* Grouping Header */}
+                                        <tr className="bg-slate-50">
+                                            <th className={superHeaderClass} colSpan={1}>Identity</th>
+                                            <th className={superHeaderClass} colSpan={2}>Crew</th>
+                                            <th className={`${superHeaderClass} bg-blue-50/30 text-blue-600`} colSpan={4}>Block Times (Local)</th>
+                                            <th className={`${superHeaderClass} bg-emerald-50/30 text-emerald-600`} colSpan={2}>Duration</th>
+                                            <th className={superHeaderClass} colSpan={1}>Notes</th>
                                         </tr>
-                                    ) : (
-                                        report.entries.map((entry, idx) => (
-                                            <tr key={entry.id} className="hover:bg-slate-50/80 transition-colors group">
-                                                {/* Flight Details */}
-                                                <td className="p-4 pl-6 align-top">
-                                                    <div className="flex flex-col gap-1.5">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-black text-slate-800 text-sm tracking-tight">{entry.flightNumber}</span>
-                                                            <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-500 border border-slate-200 font-mono">{entry.aircraftReg}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-2 text-xs font-bold text-slate-600 bg-slate-50 px-2 py-1 rounded border border-slate-100 w-fit">
-                                                            <span>{entry.from}</span>
-                                                            <ArrowRight size={10} className="text-slate-400" />
-                                                            <span>{entry.to}</span>
-                                                        </div>
-                                                    </div>
-                                                </td>
-
-                                                {/* Times */}
-                                                <td className="p-3 w-20 align-middle"><input className={timeInputClass} placeholder="--" value={entry.outTime} onChange={e => updateEntry(entry.id, 'outTime', e.target.value)} maxLength={5} /></td>
-                                                <td className="p-3 w-20 align-middle"><input className={timeInputClass} placeholder="--" value={entry.offTime} onChange={e => updateEntry(entry.id, 'offTime', e.target.value)} maxLength={5} /></td>
-                                                <td className="p-3 w-20 align-middle"><input className={timeInputClass} placeholder="--" value={entry.onTime} onChange={e => updateEntry(entry.id, 'onTime', e.target.value)} maxLength={5} /></td>
-                                                <td className="p-3 w-20 align-middle"><input className={timeInputClass} placeholder="--" value={entry.inTime} onChange={e => updateEntry(entry.id, 'inTime', e.target.value)} maxLength={5} /></td>
-                                                
-                                                {/* Calculations */}
-                                                <td className="p-3 w-20 bg-blue-50/30 align-middle text-center">
-                                                    <div className="font-black font-mono text-blue-700 text-sm">{entry.blockTime > 0 ? entry.blockTime.toFixed(1) : '-'}</div>
-                                                </td>
-                                                <td className="p-3 w-20 bg-emerald-50/30 align-middle text-center">
-                                                    <div className="font-black font-mono text-emerald-700 text-sm">{entry.flightTime > 0 ? entry.flightTime.toFixed(1) : '-'}</div>
-                                                </td>
-                                                
-                                                {/* Landings */}
-                                                <td className="p-2 w-16 align-middle">
+                                        {/* Column Header */}
+                                        <tr className="bg-white">
+                                            <th className={`${subHeaderClass} text-left pl-4`}>Flight / Route</th>
+                                            <th className={subHeaderClass}>PIC</th>
+                                            <th className={subHeaderClass}>SIC</th>
+                                            
+                                            <th className={`${subHeaderClass} bg-blue-50/10 w-24`}>Out</th>
+                                            <th className={`${subHeaderClass} bg-blue-50/10 w-24`}>Off</th>
+                                            <th className={`${subHeaderClass} bg-blue-50/10 w-24`}>On</th>
+                                            <th className={`${subHeaderClass} bg-blue-50/10 w-24 border-r border-slate-200`}>In</th>
+                                            
+                                            <th className={`${subHeaderClass} bg-emerald-50/20 text-emerald-700 w-24`}>Flight</th>
+                                            <th className={`${subHeaderClass} bg-blue-50/20 text-blue-700 w-24 border-r border-slate-200`}>Block</th>
+                                            
+                                            <th className={`${subHeaderClass} text-left pl-3`}>Remarks</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {aircraftFlights.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={10} className="py-24 text-center text-slate-400">
                                                     <div className="flex flex-col items-center">
-                                                        <span className={smallLabelClass}>Day</span>
-                                                        <input type="number" min="0" className={numberInputClass} value={entry.dayLandings || ''} onChange={e => updateEntry(entry.id, 'dayLandings', Number(e.target.value))} />
-                                                    </div>
-                                                </td>
-                                                <td className="p-2 w-16 align-middle border-r border-slate-100">
-                                                    <div className="flex flex-col items-center">
-                                                        <span className={smallLabelClass}>Ngt</span>
-                                                        <input type="number" min="0" className={numberInputClass + " bg-slate-50 text-slate-700"} value={entry.nightLandings || ''} onChange={e => updateEntry(entry.id, 'nightLandings', Number(e.target.value))} />
-                                                    </div>
-                                                </td>
-                                                
-                                                {/* Approaches */}
-                                                <td className="p-2 w-14 align-middle">
-                                                    <div className="flex flex-col items-center">
-                                                        <span className={smallLabelClass}>ILS</span>
-                                                        <input type="number" min="0" className={numberInputClass} value={entry.approaches.ils || ''} onChange={e => updateApproach(entry.id, 'ils', Number(e.target.value))} />
-                                                    </div>
-                                                </td>
-                                                <td className="p-2 w-14 align-middle">
-                                                    <div className="flex flex-col items-center">
-                                                        <span className={smallLabelClass}>RNAV</span>
-                                                        <input type="number" min="0" className={numberInputClass} value={entry.approaches.rnav || ''} onChange={e => updateApproach(entry.id, 'rnav', Number(e.target.value))} />
-                                                    </div>
-                                                </td>
-                                                <td className="p-2 w-14 align-middle">
-                                                    <div className="flex flex-col items-center">
-                                                        <span className={smallLabelClass}>LOC</span>
-                                                        <input type="number" min="0" className={numberInputClass} value={entry.approaches.loc || ''} onChange={e => updateApproach(entry.id, 'loc', Number(e.target.value))} />
-                                                    </div>
-                                                </td>
-                                                <td className="p-2 w-14 align-middle pr-4">
-                                                    <div className="flex flex-col items-center">
-                                                        <span className={smallLabelClass}>VOR</span>
-                                                        <input type="number" min="0" className={numberInputClass} value={entry.approaches.vor || ''} onChange={e => updateApproach(entry.id, 'vor', Number(e.target.value))} />
+                                                        <Plane className="opacity-20 mb-4" size={48} />
+                                                        <p className="font-medium text-slate-600">No flights scheduled today</p>
+                                                        <p className="text-xs mt-1">Use Flight Planning to add sectors for {selectedAircraftReg}</p>
                                                     </div>
                                                 </td>
                                             </tr>
-                                        ))
+                                        ) : (
+                                            aircraftFlights.map((flight) => {
+                                                const edit = edits[flight.id] || { outTime: '', offTime: '', onTime: '', inTime: '', notes: '' };
+                                                const fTime = calculateDuration(edit.offTime, edit.onTime);
+                                                const cTime = calculateDuration(edit.outTime, edit.inTime);
+                                                const routeParts = flight.route.split('-');
+
+                                                return (
+                                                    <tr key={flight.id} className="hover:bg-slate-50 transition-colors group">
+                                                        {/* Identity */}
+                                                        <td className="px-4 py-3 border-r border-slate-100">
+                                                            <div className="flex flex-col">
+                                                                <span className="font-bold text-slate-800 text-sm">{flight.flightNumber}</span>
+                                                                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 mt-0.5">
+                                                                    <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{routeParts[0] || '---'}</span>
+                                                                    <ArrowRight size={10} className="opacity-50" />
+                                                                    <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{routeParts[1] || '---'}</span>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+
+                                                        {/* Crew */}
+                                                        <td className="px-2 py-3 text-center border-r border-slate-100">
+                                                            <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 min-w-[60px] justify-center">
+                                                                <User size={10} className="opacity-50"/> {flight.pic}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-2 py-3 text-center border-r border-slate-100">
+                                                            {flight.sic ? (
+                                                                <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-white border border-slate-100 text-xs font-medium text-slate-500 min-w-[60px] justify-center">
+                                                                    {flight.sic}
+                                                                </div>
+                                                            ) : <span className="text-slate-300">-</span>}
+                                                        </td>
+
+                                                        {/* Times Inputs */}
+                                                        <td className={inputCellClass}><input type="time" className={inputClass} value={edit.outTime} onChange={e => handleEdit(flight.id, 'outTime', e.target.value)} placeholder="--:--" /></td>
+                                                        <td className={inputCellClass}><input type="time" className={inputClass} value={edit.offTime} onChange={e => handleEdit(flight.id, 'offTime', e.target.value)} placeholder="--:--" /></td>
+                                                        <td className={inputCellClass}><input type="time" className={inputClass} value={edit.onTime} onChange={e => handleEdit(flight.id, 'onTime', e.target.value)} placeholder="--:--" /></td>
+                                                        <td className={`${inputCellClass} border-r border-slate-200`}><input type="time" className={inputClass} value={edit.inTime} onChange={e => handleEdit(flight.id, 'inTime', e.target.value)} placeholder="--:--" /></td>
+
+                                                        {/* Calculations */}
+                                                        <td className={`${calcCellClass} bg-emerald-50/40 text-emerald-700`}>
+                                                            {fTime > 0 ? fTime.toFixed(2) : <span className="text-emerald-200">-</span>}
+                                                        </td>
+                                                        <td className={`${calcCellClass} bg-blue-50/40 text-blue-700 border-r border-slate-200`}>
+                                                            {cTime > 0 ? cTime.toFixed(2) : <span className="text-blue-200">-</span>}
+                                                        </td>
+
+                                                        {/* Notes */}
+                                                        <td className="px-3 py-2">
+                                                            <input 
+                                                                type="text" 
+                                                                className="w-full text-xs font-medium border-0 border-b border-slate-200 bg-transparent focus:bg-white focus:border-blue-500 focus:ring-0 text-slate-600 placeholder:text-slate-300 px-1 py-1.5 transition-colors" 
+                                                                placeholder="Add remarks..."
+                                                                value={edit.notes}
+                                                                onChange={e => handleEdit(flight.id, 'notes', e.target.value)}
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                    {aircraftFlights.length > 0 && (
+                                        <tfoot className="bg-slate-50 border-t border-slate-200 shadow-inner">
+                                            <tr>
+                                                <td colSpan={7} className="px-6 py-4 text-right">
+                                                    <div className="flex items-center justify-end gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
+                                                        <Clock size={14} /> Total Daily Hours
+                                                    </div>
+                                                </td>
+                                                <td className="px-2 py-4 text-center">
+                                                    <div className="bg-emerald-100 text-emerald-800 font-black font-mono text-lg py-1 px-3 rounded-lg border border-emerald-200 shadow-sm inline-block min-w-[80px]">
+                                                        {aircraftFlights.reduce((acc, f) => {
+                                                            const edit = edits[f.id];
+                                                            return acc + (edit ? calculateDuration(edit.offTime, edit.onTime) : 0);
+                                                        }, 0).toFixed(2)}
+                                                    </div>
+                                                </td>
+                                                <td className="px-2 py-4 text-center border-r border-slate-200">
+                                                    <div className="bg-blue-100 text-blue-800 font-black font-mono text-lg py-1 px-3 rounded-lg border border-blue-200 shadow-sm inline-block min-w-[80px]">
+                                                        {aircraftFlights.reduce((acc, f) => {
+                                                            const edit = edits[f.id];
+                                                            return acc + (edit ? calculateDuration(edit.outTime, edit.inTime) : 0);
+                                                        }, 0).toFixed(2)}
+                                                    </div>
+                                                </td>
+                                                <td></td>
+                                            </tr>
+                                        </tfoot>
                                     )}
-                                </tbody>
-                                <tfoot className="bg-slate-50 border-t border-slate-200">
-                                    <tr>
-                                        <td colSpan={5} className="px-6 py-4 text-right font-bold text-slate-500 uppercase text-xs tracking-widest">Daily Totals</td>
-                                        <td className="px-3 py-4 text-center font-black font-mono text-blue-800 text-lg bg-blue-100/50 border-t border-blue-200">{totalBlock.toFixed(1)}</td>
-                                        <td className="px-3 py-4 text-center font-black font-mono text-emerald-800 text-lg bg-emerald-100/50 border-t border-emerald-200">{totalFlight.toFixed(1)}</td>
-                                        <td className="px-3 py-4 text-center font-bold text-slate-700">{totalDayLdgs}</td>
-                                        <td className="px-3 py-4 text-center font-bold text-slate-700 border-r border-slate-200">{totalNightLdgs}</td>
-                                        <td colSpan={4} className="text-center text-xs text-slate-400 font-medium italic">
-                                            Auto-calculated from inputs
-                                        </td>
-                                    </tr>
-                                </tfoot>
-                            </table>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 ) : (
                     <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                        <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mb-6 shadow-sm border border-slate-100">
-                            <User size={40} className="opacity-20 text-slate-600" />
+                        <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-6 shadow-sm border border-slate-100 animate-in zoom-in duration-500">
+                            <Plane size={40} className="opacity-20 text-slate-600" />
                         </div>
-                        <h3 className="text-xl font-bold text-slate-700">Select a Pilot</h3>
+                        <h3 className="text-xl font-bold text-slate-700">Select an Aircraft</h3>
                         <p className="text-sm max-w-xs text-center mt-2 text-slate-500">
-                            Select a scheduled crew member from the sidebar to view or edit their voyage report for 
-                            <span className="font-bold text-slate-700 ml-1">{new Date(currentDate).toLocaleDateString()}</span>.
+                            Select an aircraft from the sidebar to access the digital journey log.
                         </p>
                     </div>
                 )}

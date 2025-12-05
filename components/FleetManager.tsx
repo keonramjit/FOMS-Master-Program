@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Aircraft, Flight, SystemSettings } from '../types';
-import { Plane, Plus, Edit2, Search, X, Save, AlertTriangle, Wrench, CheckCircle, Activity, BarChart3, AlertOctagon, History, Clock, Filter, ClipboardList, Timer, Lock, Loader2 } from 'lucide-react';
+import { Plane, Plus, Edit2, Search, X, Save, AlertTriangle, Wrench, CheckCircle2, Activity, BarChart3, AlertOctagon, History, Clock, Filter, ClipboardList, Timer, Lock, Loader2, Gauge } from 'lucide-react';
 import { FLEET_INVENTORY } from '../constants';
 import { FeatureGate } from './FeatureGate';
 import { fetchAircraftHistory } from '../services/firebase';
@@ -46,11 +46,37 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
     return matchesSearch && matchesType;
   });
 
-  // Group by type for display
-  const groupedFleet = {
-    '1900D': filteredFleet.filter(f => f.type === '1900D'),
-    'C208EX': filteredFleet.filter(f => f.type === 'C208EX'),
-    'C208B': filteredFleet.filter(f => f.type === 'C208B'),
+  // Define explicit display order
+  const displayGroups = ['C208B', 'C208EX', '1900D'];
+
+  // Helper to get theme based on aircraft type
+  const getTypeTheme = (type: string) => {
+    switch(type) {
+      case '1900D': return { 
+          accent: 'indigo', 
+          bg: 'bg-indigo-50', 
+          border: 'border-indigo-200',
+          text: 'text-indigo-900',
+          badge: 'bg-indigo-100 text-indigo-700',
+          lightBorder: 'border-indigo-100'
+      };
+      case 'C208EX': return { 
+          accent: 'sky', 
+          bg: 'bg-sky-50', 
+          border: 'border-sky-200',
+          text: 'text-sky-900', 
+          badge: 'bg-sky-100 text-sky-700',
+          lightBorder: 'border-sky-100'
+      };
+      default: return { // C208B
+          accent: 'emerald', 
+          bg: 'bg-emerald-50', 
+          border: 'border-emerald-200',
+          text: 'text-emerald-900',
+          badge: 'bg-emerald-100 text-emerald-700',
+          lightBorder: 'border-emerald-100'
+      };
+    }
   };
 
   const handleOpenModal = (aircraft?: (Aircraft & { _docId?: string })) => {
@@ -113,23 +139,14 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
     }
   };
 
-  // --- Visual Helpers ---
-  const getTypeColor = (type: string) => {
-    switch(type) {
-      case '1900D': return 'border-indigo-500';
-      case 'C208EX': return 'border-sky-500';
-      default: return 'border-emerald-500'; // C208B
-    }
-  };
-
   const getStatusBadge = (status: string) => {
     switch (status) {
         case 'Active': 
-            return <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700 text-[11px] font-bold uppercase tracking-wider"><CheckCircle size={12} strokeWidth={3} /> Active</span>;
+            return <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wider shadow-sm"><CheckCircle2 size={12} strokeWidth={3} /> Active</span>;
         case 'Maintenance': 
-            return <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-700 text-[11px] font-bold uppercase tracking-wider"><Wrench size={12} strokeWidth={3} /> Maint</span>;
+            return <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500 text-white text-[10px] font-bold uppercase tracking-wider shadow-sm"><Wrench size={12} strokeWidth={3} /> Maint</span>;
         case 'AOG': 
-            return <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-rose-100 text-rose-700 text-[11px] font-bold uppercase tracking-wider"><AlertOctagon size={12} strokeWidth={3} /> AOG</span>;
+            return <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-bold uppercase tracking-wider shadow-sm"><AlertOctagon size={12} strokeWidth={3} /> AOG</span>;
         default: 
             return <span className="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">{status}</span>;
     }
@@ -291,19 +308,25 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
                 </div>
             </div>
 
-            <div className="space-y-10">
-                {Object.entries(groupedFleet).map(([type, aircrafts]) => {
+            <div className="space-y-8">
+                {displayGroups.map((type) => {
+                    // Filter based on our explicit order list
+                    const aircrafts = filteredFleet.filter(f => f.type === type);
+                    
                     if (aircrafts.length === 0) return null;
-                    const borderColor = getTypeColor(type);
+                    const theme = getTypeTheme(type);
                     
                     return (
                         <div key={type} className="animate-in slide-in-from-bottom-2 duration-500">
-                            <div className="flex items-center gap-3 mb-4">
-                                <h3 className="text-lg font-bold text-slate-800">{type} Series</h3>
-                                <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                                    {aircrafts.length}
+                            {/* Section Header */}
+                            <div className="flex items-center gap-4 mb-5">
+                                <span className={`px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider border ${theme.badge} ${theme.border}`}>
+                                    {type} Series
                                 </span>
-                                <div className="h-px bg-slate-200 flex-1 ml-2"></div>
+                                <div className={`h-px flex-1 ${theme.bg} ${theme.border} border-t`}></div>
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                    {aircrafts.length} Units
+                                </span>
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
@@ -316,64 +339,78 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
                                         <div 
                                             key={ac.registration} 
                                             className={`
-                                                bg-white rounded-xl shadow-sm border border-slate-200 p-5 
+                                                bg-white rounded-xl shadow-sm border p-5 
                                                 transition-all duration-200 group relative
-                                                hover:shadow-md hover:-translate-y-0.5
-                                                border-l-[4px] ${borderColor}
-                                                cursor-pointer
+                                                hover:shadow-lg hover:-translate-y-1
+                                                cursor-pointer overflow-hidden
+                                                ${theme.lightBorder} hover:border-${theme.accent}-300
                                             `}
                                             onClick={() => handleOpenHistory(ac)}
                                         >
+                                            {/* Decorative Background Icon */}
+                                            <Plane 
+                                                className={`absolute -right-6 -bottom-6 w-32 h-32 opacity-5 text-${theme.accent}-500 transform -rotate-12 pointer-events-none`} 
+                                            />
+
                                             {/* Top Row: Reg & Status */}
-                                            <div className="flex justify-between items-start mb-4">
-                                                <div>
-                                                    <div className="text-2xl font-bold text-slate-800 tracking-tight">
-                                                        {ac.registration}
+                                            <div className="flex justify-between items-start mb-4 relative z-10">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center shadow-sm text-white font-bold text-xs ${isNearCheck ? 'bg-amber-500' : theme.badge.split(' ')[0].replace('bg-', 'bg-').replace('-100', '-600')}`}>
+                                                        {ac.registration.split('-')[1]}
                                                     </div>
-                                                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-                                                        FOMS
+                                                    <div>
+                                                        <div className="text-xl font-black text-slate-800 tracking-tight leading-none">
+                                                            {ac.registration}
+                                                        </div>
+                                                        <div className={`text-[10px] font-bold uppercase tracking-wider mt-1 ${theme.text}`}>
+                                                            {ac.type}
+                                                        </div>
                                                     </div>
                                                 </div>
+                                            </div>
+
+                                            {/* Status Badge */}
+                                            <div className="mb-4 relative z-10">
                                                 {getStatusBadge(ac.status)}
                                             </div>
 
                                             {/* Maintenance Info */}
-                                            <div className="mt-4 pt-4 border-t border-slate-50">
-                                                <div className="flex justify-between items-end mb-1.5">
+                                            <div className={`mt-4 pt-4 border-t ${theme.lightBorder} relative z-10`}>
+                                                <div className="flex justify-between items-end mb-2">
                                                     <div className="flex flex-col">
-                                                        <span className="text-[10px] text-slate-400 font-semibold uppercase">Hours</span>
+                                                        <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1"><Gauge size={10}/> Hours</span>
                                                         <span className="text-sm font-bold text-slate-700 font-mono">{ac.currentHours?.toLocaleString()}</span>
                                                     </div>
                                                     <div className="flex flex-col items-end">
-                                                        <span className="text-[10px] text-slate-400 font-semibold uppercase">Check Due</span>
+                                                        <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1"><Timer size={10}/> Next Check</span>
                                                         <span className={`text-sm font-bold font-mono ${isNearCheck ? 'text-amber-600' : 'text-slate-700'}`}>
                                                             {ac.nextCheckHours?.toLocaleString()}
                                                         </span>
                                                     </div>
                                                 </div>
                                                 
-                                                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                                <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                                                     <div 
-                                                        className={`h-full rounded-full ${isNearCheck ? 'bg-amber-500' : 'bg-slate-400'}`} 
+                                                        className={`h-full rounded-full transition-all duration-500 ${isNearCheck ? 'bg-amber-500' : `bg-${theme.accent}-500`}`} 
                                                         style={{ width: `${progress}%` }}
                                                     />
                                                 </div>
                                                 {isNearCheck && (
-                                                    <div className="text-[10px] text-amber-600 font-medium mt-1 text-right flex items-center justify-end gap-1">
+                                                    <div className="text-[10px] text-amber-600 font-bold mt-1.5 text-right flex items-center justify-end gap-1 animate-pulse">
                                                         <AlertTriangle size={10} />
-                                                        Check in {remaining} hrs
+                                                        Check due in {remaining} hrs
                                                     </div>
                                                 )}
                                             </div>
 
-                                            {/* Action Buttons - Bottom Right */}
-                                            <div className="flex justify-end gap-2 mt-4 pt-2 transition-opacity" onClick={e => e.stopPropagation()}>
+                                            {/* Action Buttons - Hover Reveal */}
+                                            <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity z-20">
                                                 <button 
                                                     onClick={(e) => { e.stopPropagation(); handleOpenModal(ac); }} 
-                                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                                    className="p-2 bg-white text-slate-400 hover:text-blue-600 border border-slate-200 hover:border-blue-200 rounded-lg shadow-sm transition-all"
                                                     title="Edit Details"
                                                 >
-                                                    <Edit2 size={16}/>
+                                                    <Edit2 size={14}/>
                                                 </button>
                                             </div>
                                         </div>
@@ -423,7 +460,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {[...groupedFleet['C208B'], ...groupedFleet['C208EX']].map(ac => {
+                                {fleet.filter(f => f.type.includes('C208')).map(ac => {
                                     const check = getNextCheckDetails(ac);
                                     const isCritical = check.remaining < 25;
                                     return (

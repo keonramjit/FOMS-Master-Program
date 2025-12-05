@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition } from '../types';
 import { CalendarWidget } from './CalendarWidget';
@@ -37,7 +38,12 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
   useEffect(() => {
     if (!hasUnsavedChanges && removedFlightIds.length === 0) {
-      setLocalFlights(flights.filter(f => f.date === currentDate));
+      // Sort by persistent 'order' field to maintain visual arrangement after sync
+      const sortedFlights = flights
+        .filter(f => f.date === currentDate)
+        .sort((a, b) => (a.order ?? 99999) - (b.order ?? 99999));
+        
+      setLocalFlights(sortedFlights);
     }
   }, [currentDate, flights, hasUnsavedChanges, removedFlightIds.length]);
 
@@ -82,17 +88,23 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     setShowConfirmSync(false);
     setIsSyncing(true);
     try {
+        // Capture the current visual order by assigning an index
+        const orderedFlights = localFlights.map((f, i) => ({ ...f, order: i }));
+
         const adds: Omit<Flight, 'id'>[] = [];
         const updates: { id: string; data: Partial<Flight> }[] = [];
-        localFlights.forEach(f => {
+        
+        orderedFlights.forEach(f => {
            if (f.id.startsWith('temp-') || f.id.startsWith('imported-')) {
              const { id, ...rest } = f;
              adds.push(rest);
            } else {
              const { id, ...rest } = f;
+             // Include 'order' in the update to persist the visual arrangement
              updates.push({ id, data: rest });
            }
         });
+        
         await syncFlightSchedule(adds, updates, removedFlightIds);
         setRemovedFlightIds([]);
         setHasUnsavedChanges(false);
@@ -163,7 +175,17 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
       notes: '',
       commercialTime: ''
     };
-    setLocalFlights(prev => [...prev, newFlight]);
+    
+    // Insert immediately after the source flight to maintain visual context
+    setLocalFlights(prev => {
+        const idx = prev.findIndex(f => f.id === sourceFlight.id);
+        if (idx !== -1) {
+            const newArr = [...prev];
+            newArr.splice(idx + 1, 0, newFlight);
+            return newArr;
+        }
+        return [...prev, newFlight];
+    });
   };
 
   const handleAddReturn = (sourceFlight: Flight) => {
@@ -217,7 +239,17 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
       notes: `Return of ${sourceFlight.flightNumber}`,
       commercialTime: ''
     };
-    setLocalFlights(prev => [...prev, newFlight]);
+    
+    // Insert immediately after the source flight to maintain visual context
+    setLocalFlights(prev => {
+        const idx = prev.findIndex(f => f.id === sourceFlight.id);
+        if (idx !== -1) {
+            const newArr = [...prev];
+            newArr.splice(idx + 1, 0, newFlight);
+            return newArr;
+        }
+        return [...prev, newFlight];
+    });
   };
 
   const handleDeleteRow = (id: string) => {
@@ -248,7 +280,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     }));
   };
 
-  // REVERTED: Simple Route Change (No auto-calc)
   const handleRouteChange = (id: string, val: string) => {
     setHasUnsavedChanges(true);
     const code = val.toUpperCase();
@@ -258,33 +289,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         }
         return f;
     }));
-  };
-
-  const getGroupedFlights = (allFlights: Flight[], aircraftReg: string) => {
-    const relevant = allFlights.filter(f => f.aircraftRegistration === aircraftReg);
-    if (relevant.length === 0) return [];
-
-    const idMap = new Map(relevant.map(f => [f.id, f]));
-    const roots: Flight[] = [];
-    const childrenMap = new Map<string, Flight[]>();
-
-    relevant.forEach(f => {
-        if (f.parentId && idMap.has(f.parentId)) {
-            if (!childrenMap.has(f.parentId)) childrenMap.set(f.parentId, []);
-            childrenMap.get(f.parentId)!.push(f);
-        } else {
-            roots.push(f);
-        }
-    });
-    
-    const result: Flight[] = [];
-    roots.forEach(root => {
-        result.push(root);
-        const kids = childrenMap.get(root.id) || [];
-        result.push(...kids);
-    });
-
-    return result;
   };
 
   const aircraftGroups = ['C208B', 'C208EX', '1900D'];
@@ -322,7 +326,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     return { from: route, to: '' };
   };
 
-  // Derive unique airports from existing routes for suggestions (Legacy Logic Restored)
+  // Derive unique airports from existing routes for suggestions
   const uniqueAirports = Array.from(new Set(
       routes.flatMap(r => r.code.split('-'))
   )).sort();
@@ -429,7 +433,10 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
                         <div className="flex flex-col gap-5 px-1">
                         {groupFleet.map((aircraft) => {
-                            const groupedFlights = getGroupedFlights(localFlights, aircraft.registration);
+                            // Filter specifically for this aircraft
+                            // The relative order from localFlights is preserved, which is sorted by 'order'
+                            const aircraftFlights = localFlights.filter(f => f.aircraftRegistration === aircraft.registration);
+                            
                             const isMaintenance = aircraft.status !== 'Active';
                             const theme = getAircraftTheme();
                             
@@ -452,7 +459,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
                                     </div>
                 
                                     <div className="divide-y divide-slate-100 border-t border-slate-100">
-                                    {groupedFlights.map((flight) => {
+                                    {aircraftFlights.map((flight) => {
                                         const routeParts = getRouteParts(flight.route);
                                         const isSegment = !!flight.parentId;
 
@@ -475,7 +482,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
                                             </div>
                                             <div className={cellWrapperClass}><input value={flight.customerId || ''} onChange={(e) => handleCellChange(flight.id, 'customerId', e.target.value)} className={`${inputClass} text-slate-600 font-mono text-center`} placeholder="---" /></div>
                                             
-                                            {/* REVERTED ROUTE INPUTS TO MANUAL/SIMPLE */}
                                             <div className={cellWrapperClass}>
                                                 <input list="airport-options" value={routeParts.from} onChange={(e) => { const newVal = e.target.value.toUpperCase(); handleRouteChange(flight.id, `${newVal}-${routeParts.to}`); }} className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`} placeholder="DEP" />
                                             </div>
@@ -513,7 +519,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
             })}
             </div>
             
-            {/* Reverted to use uniqueAirports for suggestions */}
             <datalist id="airport-options">
                 {uniqueAirports.map(code => (
                     <option key={code} value={code} />
