@@ -1,3 +1,4 @@
+
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -24,11 +25,9 @@ import {
   writeBatch,
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
-  QuerySnapshot,
-  DocumentData
+  persistentMultipleTabManager
 } from "firebase/firestore";
-import { Flight, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, SystemSettings, DispatchRecord, TrainingRecord, TrainingEvent, Organization, License, UserProfile, LocationDefinition } from "../types";
+import { Flight, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, SystemSettings, DispatchRecord, TrainingRecord, TrainingEvent, Organization, License, UserProfile, LocationDefinition, AircraftType } from "../types";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC3fhxJINKe8oiizZqxbuT8wb8eTNxofDY",
@@ -42,24 +41,22 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-
 export const auth = getAuth(app);
 
-// Initialize Firestore with Offline Persistence
+// Initialize Firestore
 let db: any;
 try {
-  db = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    })
-  });
-} catch (e: any) {
-  console.warn("Firestore offline persistence could not be enabled:", e.message);
-  db = getFirestore(app);
+    db = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager()
+        })
+    });
+} catch (e) {
+    console.warn("Persistence fallback", e);
+    db = getFirestore(app);
 }
 
-// --- Helpers ---
-
+// ... Helpers ...
 const sanitizeData = <T extends Record<string, any>>(data: T): T => {
   const result = { ...data };
   Object.keys(result).forEach(key => {
@@ -70,8 +67,7 @@ const sanitizeData = <T extends Record<string, any>>(data: T): T => {
   return result;
 };
 
-// --- Authentication ---
-
+// ... Auth ...
 export const loginUser = async (email: string, pass: string) => {
   try {
     await signInWithEmailAndPassword(auth, email, pass);
@@ -95,8 +91,7 @@ export const subscribeToAuth = (callback: (user: any | null) => void) => {
   });
 };
 
-// --- User Profiles ---
-
+// ... User Profiles ...
 export const getUserProfile = async (email: string): Promise<UserProfile | null> => {
   if (!email) return null;
   try {
@@ -124,7 +119,6 @@ export const createUserProfile = async (userProfile: UserProfile) => {
 };
 
 export const fetchOrganizationUsers = async (orgId: string): Promise<UserProfile[]> => {
-  if (!auth.currentUser) return [];
   try {
     const q = query(collection(db, "users"), where("orgId", "==", orgId));
     const snapshot = await getDocs(q);
@@ -144,11 +138,9 @@ export const deleteUserProfile = async (email: string) => {
     }
 };
 
-// --- Organization & Licensing (SaaS) ---
-
+// ... Org ...
 export const subscribeToOrganization = (orgId: string, callback: (org: Organization | null) => void) => {
   const docRef = doc(db, "organizations", orgId);
-  
   return onSnapshot(docRef, (docSnap) => {
     if (docSnap.exists()) {
       callback({ id: docSnap.id, ...(docSnap.data() as any) } as Organization);
@@ -215,10 +207,77 @@ export const seedOrganization = async () => {
   }
 };
 
-// --- Flights Collection ---
+// --- Aircraft Types Collection ---
 
+export const subscribeToAircraftTypes = (callback: (types: AircraftType[]) => void) => {
+  const q = query(collection(db, "aircraft_types"));
+  // Return just the raw data, no side effects
+  return onSnapshot(q, (snapshot) => {
+    const types = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as AircraftType[];
+    callback(types);
+  }, (error) => {
+    console.error("Aircraft Types snapshot error:", error);
+  });
+};
+
+export const seedAircraftTypes = async () => {
+    const defaultTypes: Omit<AircraftType, 'id'>[] = [
+        { code: 'C208B', name: 'Cessna Grand Caravan', icao: 'C208', displayOrder: 1 },
+        { code: 'C208EX', name: 'Cessna Grand Caravan EX', icao: 'C208', displayOrder: 2 },
+        { code: '1900D', name: 'Beechcraft 1900D', icao: 'B190', displayOrder: 3 },
+        { code: 'BN2', name: 'Britten-Norman Islander', icao: 'BN2P', displayOrder: 4 },
+        { code: 'SC7', name: 'Short SC.7 Skyvan', icao: 'SH7', displayOrder: 5 }
+    ];
+    
+    try {
+        const q = query(collection(db, "aircraft_types"));
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) {
+            const batch = writeBatch(db);
+            defaultTypes.forEach(t => {
+                const ref = doc(collection(db, "aircraft_types"));
+                batch.set(ref, sanitizeData(t));
+            });
+            await batch.commit();
+            console.log("Seeded default aircraft types.");
+        } else {
+            console.log("Aircraft types already exist, skipping seed.");
+        }
+    } catch (e) {
+        console.error("Error seeding aircraft types:", e);
+    }
+};
+
+export const addAircraftType = async (type: Omit<AircraftType, 'id'>) => {
+    try {
+        await addDoc(collection(db, "aircraft_types"), sanitizeData(type));
+    } catch (e) {
+        console.error("Error adding aircraft type:", e);
+        throw e;
+    }
+};
+
+export const updateAircraftType = async (id: string, type: Partial<AircraftType>) => {
+    try {
+        const docRef = doc(db, "aircraft_types", id);
+        await updateDoc(docRef, sanitizeData(type));
+    } catch (e) {
+        console.error("Error updating aircraft type:", e);
+        throw e;
+    }
+};
+
+export const deleteAircraftType = async (id: string) => {
+    try {
+        await deleteDoc(doc(db, "aircraft_types", id));
+    } catch (e) {
+        console.error("Error deleting aircraft type:", e);
+        throw e;
+    }
+};
+
+// ... Flights ...
 export const subscribeToFlights = (date: string, callback: (flights: Flight[]) => void) => {
-  if (!auth.currentUser) return () => {};
   const q = query(collection(db, "flights"), where("date", "==", date));
   return onSnapshot(q, (snapshot) => {
     const flights = snapshot.docs.map(doc => ({
@@ -232,13 +291,8 @@ export const subscribeToFlights = (date: string, callback: (flights: Flight[]) =
 };
 
 export const fetchFlightHistory = async (startDate: string, endDate: string): Promise<Flight[]> => {
-  if (!auth.currentUser) return [];
   try {
-    const q = query(
-      collection(db, "flights"), 
-      where("date", ">=", startDate),
-      where("date", "<=", endDate)
-    );
+    const q = query(collection(db, "flights"), where("date", ">=", startDate), where("date", "<=", endDate));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({
       id: doc.id,
@@ -251,14 +305,8 @@ export const fetchFlightHistory = async (startDate: string, endDate: string): Pr
 };
 
 export const fetchAircraftHistory = async (registration: string): Promise<Flight[]> => {
-  if (!auth.currentUser) return [];
   try {
-    const q = query(
-      collection(db, "flights"),
-      where("aircraftRegistration", "==", registration),
-      orderBy("date", "desc"),
-      limit(50)
-    );
+    const q = query(collection(db, "flights"), where("aircraftRegistration", "==", registration), orderBy("date", "desc"), limit(50));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({
       id: doc.id,
@@ -281,8 +329,8 @@ export const addFlight = async (flight: Omit<Flight, 'id'>) => {
 
 export const updateFlight = async (id: string, updates: Partial<Flight>) => {
   try {
-    const flightRef = doc(db, "flights", id);
-    await updateDoc(flightRef, sanitizeData(updates));
+    const docRef = doc(db, "flights", id);
+    await updateDoc(docRef, sanitizeData(updates));
   } catch (e) {
     console.error("Error updating flight: ", e);
     throw e;
@@ -329,10 +377,9 @@ export const syncFlightSchedule = async (
   }
 };
 
-// --- Dispatch Collection ---
-
+// ... Dispatch ...
 export const subscribeToDispatch = (flightId: string, callback: (dispatch: DispatchRecord | null) => void) => {
-    if (!auth.currentUser || !flightId) return () => {};
+    if (!flightId) return () => {};
     const docRef = doc(db, "dispatch", flightId);
     return onSnapshot(docRef, (docSnap) => {
         if (docSnap.exists()) {
@@ -355,10 +402,8 @@ export const saveDispatchRecord = async (flightId: string, dispatchData: Omit<Di
     }
 };
 
-// --- Crew Collection ---
-
+// ... Crew ...
 export const subscribeToCrew = (callback: (crew: (CrewMember & { _docId: string })[]) => void) => {
-  if (!auth.currentUser) return () => {};
   const q = query(collection(db, "crew"), orderBy("name"));
   return onSnapshot(q, (snapshot) => {
     const crew = snapshot.docs.map(doc => ({
@@ -382,8 +427,8 @@ export const addCrewMember = async (crew: CrewMember) => {
 
 export const updateCrewMember = async (docId: string, updates: Partial<CrewMember>) => {
   try {
-    const crewRef = doc(db, "crew", docId);
-    await updateDoc(crewRef, sanitizeData(updates));
+    const docRef = doc(db, "crew", docId);
+    await updateDoc(docRef, sanitizeData(updates));
   } catch (e) {
     console.error("Error updating crew: ", e);
     throw e;
@@ -399,10 +444,8 @@ export const deleteCrewMember = async (docId: string) => {
   }
 };
 
-// --- Fleet Collection ---
-
+// ... Fleet ...
 export const subscribeToFleet = (callback: (fleet: (Aircraft & { _docId: string })[]) => void) => {
-  if (!auth.currentUser) return () => {};
   const q = query(collection(db, "fleet"), orderBy("registration"));
   return onSnapshot(q, (snapshot) => {
     const fleet = snapshot.docs.map(doc => ({
@@ -426,8 +469,8 @@ export const addAircraft = async (aircraft: Aircraft) => {
 
 export const updateAircraft = async (docId: string, updates: Partial<Aircraft>) => {
   try {
-    const aircraftRef = doc(db, "fleet", docId);
-    await updateDoc(aircraftRef, sanitizeData(updates));
+    const docRef = doc(db, "fleet", docId);
+    await updateDoc(docRef, sanitizeData(updates));
   } catch (e) {
     console.error("Error updating aircraft: ", e);
     throw e;
@@ -443,10 +486,8 @@ export const deleteAircraft = async (docId: string) => {
   }
 };
 
-// --- Routes Collection ---
-
+// ... Routes ...
 export const fetchRoutes = async (): Promise<RouteDefinition[]> => {
-  if (!auth.currentUser) return [];
   try {
     const q = query(collection(db, "routes"), orderBy("code"));
     const snapshot = await getDocs(q);
@@ -485,10 +526,8 @@ export const deleteRoute = async (id: string) => {
   }
 };
 
-// --- Locations Collection ---
-
+// ... Locations ...
 export const fetchLocations = async (): Promise<LocationDefinition[]> => {
-  if (!auth.currentUser) return [];
   try {
     const q = query(collection(db, "locations"), orderBy("code"));
     const snapshot = await getDocs(q);
@@ -527,10 +566,8 @@ export const deleteLocation = async (id: string) => {
   }
 };
 
-// --- Customers Collection ---
-
+// ... Customers ...
 export const fetchCustomers = async (): Promise<CustomerDefinition[]> => {
-  if (!auth.currentUser) return [];
   try {
     const q = query(collection(db, "customers"), orderBy("name"));
     const snapshot = await getDocs(q);
@@ -569,10 +606,8 @@ export const deleteCustomer = async (id: string) => {
   }
 };
 
-// --- Training Collections ---
-
+// ... Training ...
 export const subscribeToTrainingRecords = (callback: (records: TrainingRecord[]) => void) => {
-  if (!auth.currentUser) return () => {};
   const q = query(collection(db, "training_records"));
   return onSnapshot(q, (snapshot) => {
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as TrainingRecord[];
@@ -590,7 +625,6 @@ export const addTrainingRecord = async (record: Omit<TrainingRecord, 'id'>) => {
 };
 
 export const fetchCrewTrainingRecords = async (crewCode: string): Promise<TrainingRecord[]> => {
-  if (!auth.currentUser) return [];
   try {
     const q = query(collection(db, "training_records"), where("crewCode", "==", crewCode));
     const snapshot = await getDocs(q);
@@ -621,7 +655,6 @@ export const deleteTrainingRecord = async (id: string) => {
 };
 
 export const subscribeToTrainingEvents = (callback: (events: TrainingEvent[]) => void) => {
-  if (!auth.currentUser) return () => {};
   const q = query(collection(db, "training_events"), orderBy("date"));
   return onSnapshot(q, (snapshot) => {
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as TrainingEvent[];

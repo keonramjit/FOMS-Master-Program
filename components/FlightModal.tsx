@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { Flight, Aircraft, CrewMember, CustomerDefinition, SystemSettings } from '../types';
+import { Flight, Aircraft, CrewMember, CustomerDefinition, SystemSettings, AircraftType } from '../types';
 import { X, Save, Plane, Calendar, Clock, User, MapPin, ChevronDown, ArrowRightLeft, Timer, Hash, AlertTriangle, AlertCircle } from 'lucide-react';
 import { fetchCrewTrainingRecords } from '../services/firebase';
-import { z } from 'zod'; // Import Zod
+import { useAppData } from '../context/DataContext';
+import { z } from 'zod';
 
 interface FlightModalProps {
   isOpen: boolean;
@@ -18,13 +19,12 @@ interface FlightModalProps {
 }
 
 // --- ZOD VALIDATION SCHEMA ---
-// This defines the rules for a "Perfect Flight Record"
 const flightFormSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format"),
   flightNumber: z.string().regex(/^TGY\d{3,4}$/, "Flight # must be format TGY1234"),
   route: z.string().min(3, "Route code is required (e.g. OGL-KAI)"),
   aircraftRegistration: z.string().regex(/^8R-[A-Z]{3}$/, "Registration must be format 8R-XXX"),
-  aircraftType: z.enum(['C208B', 'C208EX', '1900D']),
+  aircraftType: z.string().min(1, "Aircraft Type is required"),
   etd: z.string().regex(/^\d{2}:\d{2}$/, "Time must be HH:MM"),
   flightTime: z.number().min(0.1, "Flight time must be positive").max(10, "Flight time exceeds aircraft endurance"),
   commercialTime: z.string().optional(),
@@ -47,6 +47,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   flights,
   features
 }) => {
+  const { aircraftTypes } = useAppData();
   const [formData, setFormData] = useState<Partial<Flight>>({
     flightNumber: '', date: '', route: '', aircraftRegistration: '', aircraftType: 'C208B', etd: '', flightTime: 0, commercialTime: '', pic: '', sic: '', customer: '', customerId: '', status: 'Scheduled', notes: ''
   });
@@ -55,8 +56,8 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   const [turnaroundMin, setTurnaroundMin] = useState(30);
   
   // Safety & Validation State
-  const [warnings, setWarnings] = useState<string[]>([]); // Pilot Safety Warnings (Smart Dispatch)
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({}); // Data Format Errors (Zod)
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   
   const [loading, setLoading] = useState(false);
 
@@ -115,7 +116,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
         const d = new Date();
         const todayStr = d.toISOString().split('T')[0];
         setFormData({
-            flightNumber: '', date: todayStr, route: 'OGL-', aircraftRegistration: '', aircraftType: 'C208B', etd: '08:00', flightTime: 0, commercialTime: '', pic: '', sic: '', customer: '', customerId: '', status: 'Scheduled', notes: ''
+            flightNumber: '', date: todayStr, route: 'OGL-', aircraftRegistration: '', aircraftType: aircraftTypes.length > 0 ? aircraftTypes[0].code : 'C208B', etd: '08:00', flightTime: 0, commercialTime: '', pic: '', sic: '', customer: '', customerId: '', status: 'Scheduled', notes: ''
         });
         setCreateReturn(false);
         setWarnings([]);
@@ -149,7 +150,6 @@ export const FlightModal: React.FC<FlightModalProps> = ({
     if (match) {
         const val = parseInt(match[0], 10);
         const prefix = num.slice(0, match.index);
-        // Req 1: Return flight increases by 10 (e.g. 1013 -> 1023)
         return `${prefix}${val + 10}`;
     }
     return num;
@@ -326,21 +326,17 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                         className={getInputClass('aircraftRegistration')}
                     >
                         <option value="">Select Aircraft from Fleet...</option>
-                        <optgroup label="1900D">
-                        {fleet.filter(f => f.type === '1900D').map(f => (
-                            <option key={f._docId} value={f.registration}>{f.registration} (1900D) - {f.status}</option>
-                        ))}
-                        </optgroup>
-                        <optgroup label="C208EX">
-                        {fleet.filter(f => f.type === 'C208EX').map(f => (
-                            <option key={f._docId} value={f.registration}>{f.registration} (C208EX) - {f.status}</option>
-                        ))}
-                        </optgroup>
-                        <optgroup label="C208B">
-                        {fleet.filter(f => f.type === 'C208B').map(f => (
-                            <option key={f._docId} value={f.registration}>{f.registration} (C208B) - {f.status}</option>
-                        ))}
-                        </optgroup>
+                        {aircraftTypes.map(type => {
+                            const typeFleet = fleet.filter(f => f.type === type.code);
+                            if (typeFleet.length === 0) return null;
+                            return (
+                                <optgroup key={type.id} label={type.code}>
+                                    {typeFleet.map(f => (
+                                        <option key={f._docId} value={f.registration}>{f.registration} ({f.type}) - {f.status}</option>
+                                    ))}
+                                </optgroup>
+                            );
+                        })}
                     </select>
                     <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                 </div>

@@ -1,7 +1,7 @@
 
 export interface Aircraft {
   registration: string;
-  type: 'C208B' | 'C208EX' | '1900D';
+  type: string; // Dynamic string instead of hardcoded union
   status: 'Active' | 'Maintenance' | 'AOG';
   currentHours?: number;
   nextCheckHours?: number;

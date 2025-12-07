@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition } from '../types';
+import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition, AircraftType } from '../types';
 import { CalendarWidget } from './CalendarWidget';
 import { Plus, Trash2, MapPin, User, Hash, Clock, RefreshCw, CheckCircle2, Plane, Save, ChevronDown, Activity, FileDown, ArrowRightLeft, AlertCircle } from 'lucide-react';
 import { syncFlightSchedule } from '../services/firebase';
@@ -13,6 +13,7 @@ interface FlightPlanningProps {
   crew: (CrewMember & { _docId?: string })[];
   routes: RouteDefinition[];
   customers: CustomerDefinition[];
+  aircraftTypes: AircraftType[];
   onAddFlight: (flight: Omit<Flight, 'id'>) => Promise<void>;
   onUpdateFlight: (id: string, updates: Partial<Flight>) => Promise<void>;
   onDeleteFlight: (id: string) => Promise<void>;
@@ -26,6 +27,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
   crew,
   routes,
   customers,
+  aircraftTypes,
   onAddFlight,
   onUpdateFlight,
   onDeleteFlight,
@@ -121,7 +123,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     const newFlight: Flight = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       flightNumber: 'TGY',
-      route: 'OGL-', // Req 4: Default departure airport as Ogle
+      route: 'OGL-',
       aircraftRegistration: aircraft.registration,
       aircraftType: aircraft.type,
       etd: '',
@@ -149,7 +151,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         }
     }
 
-    // Req 2: Sector retains the original flight number
     const newFlightNum = sourceFlight.flightNumber;
 
     const parentId = sourceFlight.parentId || sourceFlight.id;
@@ -171,7 +172,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
       commercialTime: ''
     };
     
-    // Insert immediately after the source flight to maintain visual context
     setLocalFlights(prev => {
         const idx = prev.findIndex(f => f.id === sourceFlight.id);
         if (idx !== -1) {
@@ -195,7 +195,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         }
     }
 
-    // Req 1: Return flight increases by 10 (e.g. 1013 -> 1023)
     let newFlightNum = 'TGY';
     const numMatch = sourceFlight.flightNumber.match(/(\d+)$/);
     if (numMatch) {
@@ -236,7 +235,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
       commercialTime: ''
     };
     
-    // Insert immediately after the source flight to maintain visual context
     setLocalFlights(prev => {
         const idx = prev.findIndex(f => f.id === sourceFlight.id);
         if (idx !== -1) {
@@ -287,16 +285,21 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     }));
   };
 
-  const aircraftGroups = ['C208B', 'C208EX', '1900D'];
+  // Dynamic pilots
   const pilots = crew.filter(c => !c.role?.toLowerCase().includes('cabin crew')).sort((a,b) => a.code.localeCompare(b.code));
 
-  const getAircraftTheme = () => ({ 
-      bg: 'bg-emerald-50', 
-      border: 'border-emerald-200', 
-      text: 'text-emerald-900', 
-      accent: 'bg-emerald-600', 
-      hover: 'hover:bg-emerald-100' 
-  });
+  // Dynamic Theme Generation
+  const getDynamicAircraftTheme = (index: number) => {
+      const themes = [
+          { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-900', accent: 'bg-emerald-600', hover: 'hover:bg-emerald-100' },
+          { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-900', accent: 'bg-sky-600', hover: 'hover:bg-sky-100' },
+          { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-900', accent: 'bg-indigo-600', hover: 'hover:bg-indigo-100' },
+          { bg: 'bg-fuchsia-50', border: 'border-fuchsia-200', text: 'text-fuchsia-900', accent: 'bg-fuchsia-600', hover: 'hover:bg-fuchsia-100' },
+          { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-900', accent: 'bg-orange-600', hover: 'hover:bg-orange-100' },
+          { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-900', accent: 'bg-teal-600', hover: 'hover:bg-teal-100' },
+      ];
+      return themes[index % themes.length];
+  };
 
   const gridCols = "grid-cols-[1.3fr_0.5fr_0.35fr_0.35fr_0.5fr_0.5fr_0.4fr_0.6fr_0.7fr_0.5fr_0.8fr_0.9fr_96px]";
   const cellWrapperClass = "border-r border-slate-200 p-0 relative focus-within:z-10 bg-white transition-colors hover:bg-slate-50 flex items-center";
@@ -410,14 +413,20 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
             </div>
 
             <div className="flex flex-col gap-8 mt-0 bg-slate-100/50 pt-2">
-            {aircraftGroups.map((groupType) => {
+            {aircraftTypes.map((typeObj, index) => {
+                const groupType = typeObj.code;
                 const groupFleet = fleet.filter(f => f.type === groupType).sort((a,b) => a.registration.localeCompare(b.registration));
+                
+                // Even if no aircraft in fleet, if we have local flights for this type we should show them? 
+                // Or maybe just hide empty sections.
                 if (groupFleet.length === 0) return null;
+
+                const theme = getDynamicAircraftTheme(index);
 
                 return (
                     <div key={groupType} className="flex flex-col gap-5">
                         <div className="flex items-center gap-4 px-3 py-2 mt-4 bg-slate-200/50 border-y border-slate-200 backdrop-blur-sm sticky top-[42px] z-10">
-                            <h3 className="text-lg font-black text-slate-700 uppercase tracking-widest">{groupType} Fleet</h3>
+                            <h3 className="text-lg font-black text-slate-700 uppercase tracking-widest">{typeObj.name}</h3>
                             <div className="h-1 bg-slate-300 flex-1 rounded-full opacity-50"></div>
                             <span className="text-xs font-bold text-slate-500 uppercase tracking-wide bg-slate-100 px-2 py-0.5 rounded border border-slate-300">{groupFleet.length} Aircraft</span>
                         </div>
@@ -425,11 +434,9 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
                         <div className="flex flex-col gap-5 px-1">
                         {groupFleet.map((aircraft) => {
                             // Filter specifically for this aircraft
-                            // The relative order from localFlights is preserved, which is sorted by 'order'
                             const aircraftFlights = localFlights.filter(f => f.aircraftRegistration === aircraft.registration);
                             
                             const isMaintenance = aircraft.status !== 'Active';
-                            const theme = getAircraftTheme();
                             
                             return (
                                 <div key={aircraft.registration} className={`group/section bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden hover:shadow-lg hover:border-slate-400 transition-all duration-300`}>
@@ -473,7 +480,6 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
                                             </div>
                                             <div className={cellWrapperClass}><input value={flight.customerId || ''} onChange={(e) => handleCellChange(flight.id, 'customerId', e.target.value)} className={`${inputClass} text-slate-600 font-mono text-center`} placeholder="---" /></div>
                                             
-                                            {/* Req 3: Removed Dropdowns for Airports */}
                                             <div className={cellWrapperClass}>
                                                 <input value={routeParts.from} onChange={(e) => { const newVal = e.target.value.toUpperCase(); handleRouteChange(flight.id, `${newVal}-${routeParts.to}`); }} className={`${inputClass} text-blue-800 font-bold font-mono uppercase tracking-wide text-center`} placeholder="DEP" />
                                             </div>

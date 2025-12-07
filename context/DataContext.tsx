@@ -2,13 +2,13 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { 
   Flight, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, 
-  SystemSettings, UserProfile, LocationDefinition, OperationsStats, FlightStatus 
+  SystemSettings, UserProfile, LocationDefinition, OperationsStats, FlightStatus, AircraftType 
 } from '../types';
 import { INITIAL_FLIGHTS, CREW_ROSTER, FLEET_INVENTORY } from '../constants';
 import { 
   subscribeToAuth, logoutUser, getUserProfile, createUserProfile,
   subscribeToOrganization, subscribeToCrew, subscribeToFleet, subscribeToFlights,
-  fetchRoutes, fetchLocations, fetchCustomers,
+  fetchRoutes, fetchLocations, fetchCustomers, subscribeToAircraftTypes,
   addFlight as apiAddFlight, updateFlight as apiUpdateFlight, deleteFlight as apiDeleteFlight,
   addCrewMember as apiAddCrew, updateCrewMember as apiUpdateCrew,
   addAircraft as apiAddAircraft, updateAircraft as apiUpdateAircraft,
@@ -17,7 +17,8 @@ import {
   addCustomer as apiAddCustomer, updateCustomer as apiUpdateCustomer, deleteCustomer as apiDeleteCustomer,
   updateOrganizationLicense,
   addTrainingRecord as apiAddTrainingRecord, updateTrainingRecord as apiUpdateTrainingRecord, deleteTrainingRecord as apiDeleteTrainingRecord,
-  addTrainingEvent as apiAddTrainingEvent, updateTrainingEvent as apiUpdateTrainingEvent, deleteTrainingEvent as apiDeleteTrainingEvent
+  addTrainingEvent as apiAddTrainingEvent, updateTrainingEvent as apiUpdateTrainingEvent, deleteTrainingEvent as apiDeleteTrainingEvent,
+  addAircraftType as apiAddAircraftType, updateAircraftType as apiUpdateAircraftType, deleteAircraftType as apiDeleteAircraftType
 } from '../services/firebase';
 
 interface DataContextType {
@@ -44,6 +45,7 @@ interface DataContextType {
   routes: RouteDefinition[];
   locations: LocationDefinition[];
   customers: CustomerDefinition[];
+  aircraftTypes: AircraftType[];
   
   // Derived
   stats: OperationsStats;
@@ -71,6 +73,10 @@ interface DataContextType {
   addCustomer: (data: Omit<CustomerDefinition, 'id'>) => Promise<void>;
   updateCustomer: (id: string, data: Partial<CustomerDefinition>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
+
+  addAircraftType: (data: Omit<AircraftType, 'id'>) => Promise<void>;
+  updateAircraftType: (id: string, data: Partial<AircraftType>) => Promise<void>;
+  deleteAircraftType: (id: string) => Promise<void>;
 
   // Passthroughs for sub-modules that handle their own specialized CRUD
   apiAddTrainingRecord: typeof apiAddTrainingRecord;
@@ -104,6 +110,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [routes, setRoutes] = useState<RouteDefinition[]>([]);
   const [locations, setLocations] = useState<LocationDefinition[]>([]);
   const [customers, setCustomers] = useState<CustomerDefinition[]>([]);
+  const [aircraftTypes, setAircraftTypes] = useState<AircraftType[]>([]);
 
   const [features, setFeatures] = useState<SystemSettings>({
     enableFleetManagement: true,
@@ -157,6 +164,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setRoutes([]);
         setLocations([]);
         setCustomers([]);
+        setAircraftTypes([
+            { id: '1', code: 'C208B', name: 'Cessna Grand Caravan', icao: 'C208' },
+            { id: '2', code: 'C208EX', name: 'Cessna Grand Caravan EX', icao: 'C208' },
+            { id: '3', code: '1900D', name: 'Beechcraft 1900D', icao: 'B190' }
+        ]);
         return;
     }
 
@@ -172,6 +184,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const unsubscribeCrew = subscribeToCrew(setCrew);
     const unsubscribeFleet = subscribeToFleet(setFleet);
+    const unsubscribeTypes = subscribeToAircraftTypes(setAircraftTypes);
 
     const loadStaticData = async () => {
         setRoutes(await fetchRoutes());
@@ -184,6 +197,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (unsubscribeOrg) unsubscribeOrg();
       if (unsubscribeCrew) unsubscribeCrew();
       if (unsubscribeFleet) unsubscribeFleet();
+      if (unsubscribeTypes) unsubscribeTypes();
     };
   }, [user, userProfile?.orgId, isDemoMode]);
 
@@ -318,12 +332,27 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
   };
 
+  const addAircraftType = async (data: Omit<AircraftType, 'id'>) => {
+      if(isDemoMode) setAircraftTypes(prev => [...prev, { ...data, id: `demo-${Date.now()}` }]);
+      else await apiAddAircraftType(data);
+  };
+
+  const updateAircraftType = async (id: string, data: Partial<AircraftType>) => {
+      if(isDemoMode) setAircraftTypes(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
+      else await apiUpdateAircraftType(id, data);
+  };
+
+  const deleteAircraftType = async (id: string) => {
+      if(isDemoMode) setAircraftTypes(prev => prev.filter(t => t.id !== id));
+      else await apiDeleteAircraftType(id);
+  };
+
   return (
     <DataContext.Provider value={{
       user, userProfile, authLoading, logout: logoutUser,
       isDemoMode, setIsDemoMode, features, updateLicense,
       currentDate, setCurrentDate,
-      flights, crew, fleet, routes, locations, customers,
+      flights, crew, fleet, routes, locations, customers, aircraftTypes,
       stats, filteredFlights,
       addFlight, updateFlight, deleteFlight,
       addCrew, updateCrew,
@@ -331,6 +360,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       addRoute, updateRoute, deleteRoute,
       addLocation, updateLocation, deleteLocation,
       addCustomer, updateCustomer, deleteCustomer,
+      addAircraftType, updateAircraftType, deleteAircraftType,
       apiAddTrainingRecord, apiUpdateTrainingRecord, apiDeleteTrainingRecord,
       apiAddTrainingEvent, apiUpdateTrainingEvent, apiDeleteTrainingEvent
     }}>

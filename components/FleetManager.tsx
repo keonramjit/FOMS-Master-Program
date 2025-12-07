@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
-import { Aircraft, Flight, SystemSettings } from '../types';
-import { Plane, Plus, Edit2, Search, X, Save, AlertTriangle, Wrench, CheckCircle2, Activity, BarChart3, AlertOctagon, History, Clock, Filter, ClipboardList, Timer, Lock, Loader2, Gauge } from 'lucide-react';
+import { Aircraft, Flight, SystemSettings, AircraftType } from '../types';
+import { Plane, Plus, Edit2, Search, X, Save, AlertTriangle, Wrench, CheckCircle2, Activity, AlertOctagon, History, Timer, Lock, Loader2, Gauge, Filter } from 'lucide-react';
 import { FLEET_INVENTORY } from '../constants';
 import { FeatureGate } from './FeatureGate';
 import { fetchAircraftHistory } from '../services/firebase';
@@ -8,12 +9,13 @@ import { fetchAircraftHistory } from '../services/firebase';
 interface FleetManagerProps {
   fleet: (Aircraft & { _docId?: string })[];
   flights: Flight[];
+  aircraftTypes: AircraftType[];
   onAdd: (aircraft: Aircraft) => void;
   onUpdate: (docId: string, updates: Partial<Aircraft>) => void;
   features: SystemSettings;
 }
 
-export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAdd, onUpdate, features }) => {
+export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, aircraftTypes, onAdd, onUpdate, features }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'checks'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('All');
@@ -36,9 +38,6 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
     nextCheckHours: 0
   });
 
-  // Get unique types for filter
-  const aircraftTypes = Array.from(new Set(fleet.map(f => f.type))).sort();
-
   const filteredFleet = fleet.filter(f => {
     const matchesSearch = f.registration.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           f.type.toLowerCase().includes(searchTerm.toLowerCase());
@@ -46,37 +45,16 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
     return matchesSearch && matchesType;
   });
 
-  // Define explicit display order
-  const displayGroups = ['C208B', 'C208EX', '1900D'];
-
-  // Helper to get theme based on aircraft type
-  const getTypeTheme = (type: string) => {
-    switch(type) {
-      case '1900D': return { 
-          accent: 'indigo', 
-          bg: 'bg-indigo-50', 
-          border: 'border-indigo-200',
-          text: 'text-indigo-900',
-          badge: 'bg-indigo-100 text-indigo-700',
-          lightBorder: 'border-indigo-100'
-      };
-      case 'C208EX': return { 
-          accent: 'sky', 
-          bg: 'bg-sky-50', 
-          border: 'border-sky-200',
-          text: 'text-sky-900', 
-          badge: 'bg-sky-100 text-sky-700',
-          lightBorder: 'border-sky-100'
-      };
-      default: return { // C208B
-          accent: 'emerald', 
-          bg: 'bg-emerald-50', 
-          border: 'border-emerald-200',
-          text: 'text-emerald-900',
-          badge: 'bg-emerald-100 text-emerald-700',
-          lightBorder: 'border-emerald-100'
-      };
-    }
+  // Dynamic Theme Generator
+  const getTypeTheme = (index: number) => {
+      const themes = [
+          { badge: 'bg-emerald-100 text-emerald-700', border: 'border-emerald-200', bg: 'bg-emerald-50', text: 'text-emerald-900', lightBorder: 'border-emerald-100', accent: 'emerald' },
+          { badge: 'bg-sky-100 text-sky-700', border: 'border-sky-200', bg: 'bg-sky-50', text: 'text-sky-900', lightBorder: 'border-sky-100', accent: 'sky' },
+          { badge: 'bg-indigo-100 text-indigo-700', border: 'border-indigo-200', bg: 'bg-indigo-50', text: 'text-indigo-900', lightBorder: 'border-indigo-100', accent: 'indigo' },
+          { badge: 'bg-amber-100 text-amber-700', border: 'border-amber-200', bg: 'bg-amber-50', text: 'text-amber-900', lightBorder: 'border-amber-100', accent: 'amber' },
+          { badge: 'bg-purple-100 text-purple-700', border: 'border-purple-200', bg: 'bg-purple-50', text: 'text-purple-900', lightBorder: 'border-purple-100', accent: 'purple' },
+      ];
+      return themes[index % themes.length];
   };
 
   const handleOpenModal = (aircraft?: (Aircraft & { _docId?: string })) => {
@@ -93,7 +71,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
       setEditingAircraft(null);
       setFormData({ 
         registration: '8R-', 
-        type: 'C208B', 
+        type: aircraftTypes.length > 0 ? aircraftTypes[0].code : 'C208B', 
         status: 'Active',
         currentHours: 0,
         nextCheckHours: 100
@@ -154,10 +132,6 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
 
   // Logic for Fleet Checks
   const getNextCheckDetails = (aircraft: Aircraft) => {
-    // Determine Type of Check
-    // Cycle: 100(A), 200(B), 300(A), 400(C), 500(A), 600(D)
-    // We base this on the next scheduled check hour
-    
     const nextDue = aircraft.nextCheckHours || 0;
     const cyclePos = nextDue % 600;
     
@@ -196,7 +170,6 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
      return remaining < 50 && remaining > 0;
   }).length;
 
-  // Use history data for calculations
   const recordedHours = historyData.reduce((acc, f) => acc + (f.flightTime || 0), 0);
 
   return (
@@ -241,7 +214,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
             className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-all ${activeTab === 'checks' ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-100' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
         >
             <div className="flex items-center gap-2">
-                <ClipboardList size={18} />
+                <Gauge size={18} />
                 Fleet Checks
                 {!features.enableFleetChecks && <Lock size={12} className="opacity-50" />}
             </div>
@@ -302,26 +275,27 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
                     >
                         <option value="All">All Types</option>
                         {aircraftTypes.map(type => (
-                            <option key={type} value={type}>{type}</option>
+                            <option key={type.id} value={type.code}>{type.code}</option>
                         ))}
                     </select>
                 </div>
             </div>
 
             <div className="space-y-8">
-                {displayGroups.map((type) => {
-                    // Filter based on our explicit order list
+                {aircraftTypes.map((typeObj, index) => {
+                    const type = typeObj.code;
+                    // Filter based on dynamic types
                     const aircrafts = filteredFleet.filter(f => f.type === type);
                     
                     if (aircrafts.length === 0) return null;
-                    const theme = getTypeTheme(type);
+                    const theme = getTypeTheme(index);
                     
                     return (
                         <div key={type} className="animate-in slide-in-from-bottom-2 duration-500">
                             {/* Section Header */}
                             <div className="flex items-center gap-4 mb-5">
                                 <span className={`px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider border ${theme.badge} ${theme.border}`}>
-                                    {type} Series
+                                    {typeObj.name}
                                 </span>
                                 <div className={`h-px flex-1 ${theme.bg} ${theme.border} border-t`}></div>
                                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -436,15 +410,14 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
         <FeatureGate isEnabled={features.enableFleetChecks}>
             <div className="animate-in slide-in-from-bottom-2 duration-300 space-y-8">
                 
-                {/* C208 Series Section */}
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
                         <h3 className="font-bold text-slate-800 flex items-center gap-2">
                             <Wrench className="text-emerald-600" size={20} />
-                            C208 Series Maintenance Status
+                            Fleet Maintenance Status
                         </h3>
                         <span className="text-xs text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full font-medium">
-                            Cycle: A(100) → B(200) → A(300) → C(400) → A(500) → D(600)
+                            Standard Cycle: A(100) → B(200) → A(300) → C(400) → A(500) → D(600)
                         </span>
                     </div>
                     <div className="overflow-x-auto">
@@ -460,7 +433,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {fleet.filter(f => f.type.includes('C208')).map(ac => {
+                                {fleet.map(ac => {
                                     const check = getNextCheckDetails(ac);
                                     const isCritical = check.remaining < 25;
                                     return (
@@ -504,23 +477,6 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
                     </div>
                 </div>
 
-                {/* 1900D Series Section - Placeholder */}
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden opacity-80">
-                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                        <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                            <Wrench className="text-indigo-600" size={20} />
-                            1900D Series Maintenance Status
-                        </h3>
-                    </div>
-                    <div className="p-12 flex flex-col items-center justify-center text-slate-400">
-                        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-3">
-                            <Timer size={32} className="opacity-50" />
-                        </div>
-                        <p className="font-medium text-lg text-slate-600">Maintenance Schedule TBA</p>
-                        <p className="text-sm mt-1">1900D check logic is currently under development.</p>
-                    </div>
-                </div>
-
             </div>
         </FeatureGate>
       )}
@@ -528,7 +484,6 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
       {/* Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            {/* ... (Existing Modal Code) ... */}
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                     <h2 className="font-bold text-lg text-slate-900">
@@ -555,12 +510,12 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, onAd
                             <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Type</label>
                             <select 
                                 value={formData.type}
-                                onChange={e => setFormData(prev => ({ ...prev, type: e.target.value as any }))}
+                                onChange={e => setFormData(prev => ({ ...prev, type: e.target.value }))}
                                 className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                             >
-                                <option value="C208B">C208B</option>
-                                <option value="C208EX">C208EX</option>
-                                <option value="1900D">1900D</option>
+                                {aircraftTypes.map(type => (
+                                    <option key={type.id} value={type.code}>{type.code}</option>
+                                ))}
                             </select>
                         </div>
                         <div>

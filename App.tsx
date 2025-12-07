@@ -20,10 +20,11 @@ const TrainingPage = React.lazy(() => import('./pages/TrainingPage').then(module
 const RoutePage = React.lazy(() => import('./pages/RoutePage').then(module => ({ default: module.RoutePage })));
 const CustomerPage = React.lazy(() => import('./pages/CustomerPage').then(module => ({ default: module.CustomerPage })));
 const AdminPage = React.lazy(() => import('./pages/AdminPage').then(module => ({ default: module.AdminPage })));
+const SettingsPage = React.lazy(() => import('./pages/SettingsPage').then(module => ({ default: module.SettingsPage })));
 
 const AppContent: React.FC = () => {
   const { 
-    user, authLoading, isDemoMode, setIsDemoMode, logout, features, 
+    user, userProfile, authLoading, isDemoMode, setIsDemoMode, logout, features, 
     addFlight, updateFlight, fleet, crew, customers, flights
   } = useAppData();
 
@@ -48,6 +49,7 @@ const AppContent: React.FC = () => {
         <Sidebar 
           onLogout={logout}
           userEmail={user?.email}
+          userRole={userProfile?.role}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
           features={features}
@@ -77,6 +79,7 @@ const AppContent: React.FC = () => {
                   <Route path="/training" element={features.enableTrainingManagement ? <TrainingPage /> : <Navigate to="/" />} />
                   <Route path="/routes" element={features.enableRouteManagement ? <RoutePage /> : <Navigate to="/" />} />
                   <Route path="/customers" element={features.enableCustomerDatabase ? <CustomerPage /> : <Navigate to="/" />} />
+                  <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/admin" element={<AdminPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

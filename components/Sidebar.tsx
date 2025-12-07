@@ -8,13 +8,12 @@ import {
   X,
   Calendar,
   Shield,
-  Map,
-  Briefcase,
   ClipboardList,
   LogOut,
   ChevronLeft,
   BookOpen,
-  GraduationCap
+  GraduationCap,
+  Settings
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { SystemSettings } from '../types';
@@ -22,6 +21,7 @@ import { SystemSettings } from '../types';
 interface SidebarProps {
   onLogout: () => void;
   userEmail?: string | null;
+  userRole?: string;
   isOpen: boolean;
   onClose: () => void;
   features: SystemSettings;
@@ -32,6 +32,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ 
   onLogout, 
   userEmail,
+  userRole,
   isOpen,
   onClose,
   features,
@@ -172,27 +173,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             />
           )}
 
-          {features.enableRouteManagement && (
+          {/* Settings Section */}
+          <div className="pt-4 mt-2 border-t border-slate-700/50 space-y-2">
             <NavItem 
-                icon={<Map size={20} />} 
-                label="Routes" 
-                active={location.pathname === '/routes'} 
-                onClick={() => handleNavigate('/routes')}
+                icon={<Settings size={20} />} 
+                label="Settings" 
+                active={location.pathname === '/settings'} 
+                onClick={() => handleNavigate('/settings')}
                 collapsed={isCollapsed}
             />
-          )}
-
-          {features.enableCustomerDatabase && (
-            <NavItem 
-                icon={<Briefcase size={20} />} 
-                label="Customers" 
-                active={location.pathname === '/customers'} 
-                onClick={() => handleNavigate('/customers')}
-                collapsed={isCollapsed}
-            />
-          )}
-
-          <div className="pt-4 mt-2 border-t border-slate-700/50">
+            
             <NavItem 
                 icon={<Shield size={20} />} 
                 label="Admin" 
@@ -207,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className={`border-t border-slate-700 transition-all duration-300 ${isCollapsed ? 'p-2' : 'p-4'}`}>
             {!isCollapsed && (
                 <div className="mb-3 px-2 text-[10px] font-mono text-slate-500 text-center tracking-widest opacity-60 whitespace-nowrap overflow-hidden">
-                {features.systemVersion || 'V11282025|1030'}
+                {features.systemVersion || 'V1.0.0'}
                 </div>
             )}
           
@@ -221,9 +211,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <p className="text-sm font-medium truncate" title={userEmail || 'User'}>
                         {userEmail?.split('@')[0] || 'Ops User'}
                     </p>
-                    <div className="flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                        <p className="text-xs text-slate-400">Online</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{userRole || 'GUEST'}</p>
                     </div>
                 </div>
             )}

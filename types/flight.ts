@@ -8,7 +8,7 @@ export interface Flight {
   flightNumber: string;
   route: string;
   aircraftRegistration: string;
-  aircraftType: string;
+  aircraftType: string; // Dynamic string
   etd: string; // Estimated Time of Departure (HH:mm)
   flightTime?: number; // Planned Duration in hours
   commercialTime?: string; // Planned Commercial Time (HH:mm)
