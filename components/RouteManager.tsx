@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { RouteDefinition, LocationDefinition, SystemSettings } from '../types';
-import { Trash2, Plus, Edit2, Save, MapPin, Upload, FileSpreadsheet, Loader2, Search, ChevronLeft, ChevronRight, ArrowRight, Route, Globe, Lock } from 'lucide-react';
+import { RouteDefinition, LocationDefinition, SystemSettings, RoutePerformance } from '../types';
+import { Trash2, Plus, Edit2, Save, MapPin, Upload, FileSpreadsheet, Loader2, Search, ChevronLeft, ChevronRight, ArrowRight, Route, Globe, Lock, X, Download } from 'lucide-react';
 import { FeatureGate } from './FeatureGate';
 import { decimalToHm, hmToDecimal } from '../utils/calculations';
+import { useAppData } from '../context/DataContext';
 
 interface RouteManagerProps {
   routes: RouteDefinition[];
@@ -28,6 +29,7 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
   onDeleteLocation,
   features
 }) => {
+  const { aircraftTypes } = useAppData();
   const [activeTab, setActiveTab] = useState<'routes' | 'locations'>('routes');
   
   // Route State
@@ -35,10 +37,14 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [routeSearch, setRouteSearch] = useState('');
   const [routeForm, setRouteForm] = useState<Partial<RouteDefinition>>({});
+  
+  // Performance Sub-Form State
+  const [perfForm, setPerfForm] = useState<{ type: string; ft: string; buf: string; ct: string }>({
+      type: '', ft: '', buf: '', ct: ''
+  });
+
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [times208B, setTimes208B] = useState({ ft: '', buf: '', ct: '' });
-  const [times208EX, setTimes208EX] = useState({ ft: '', buf: '', ct: '' });
 
   // Location State
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
@@ -47,76 +53,58 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
   const [currentLocationPage, setCurrentLocationPage] = useState(1);
   const [itemsPerLocationPage, setItemsPerLocationPage] = useState(10);
 
-  // -- Helpers --
-
-  const calculateDefaultsFromDistance = (distance: number) => {
-      if (!distance || distance <= 0) return null;
-
-      // Assumptions
-      const speed208B = 150; // knots
-      const speed208EX = 160; // knots
-      const buffer = 0.25; // 15 mins taxi/circuit buffer
-
-      // C208B
-      const ft208b = parseFloat((distance / speed208B).toFixed(2));
-      const ct208b = parseFloat((ft208b + buffer).toFixed(2));
-
-      // C208EX
-      const ft208ex = parseFloat((distance / speed208EX).toFixed(2));
-      const ct208ex = parseFloat((ft208ex + buffer).toFixed(2));
-
-      return {
-          ft208b: decimalToHm(ft208b),
-          ct208b: decimalToHm(ct208b),
-          ft208ex: decimalToHm(ft208ex),
-          ct208ex: decimalToHm(ct208ex)
-      };
-  };
-
-  // Auto-fill times when distance changes IF fields are empty
-  useEffect(() => {
-      if (routeForm.distance && !editingId) {
-          const defaults = calculateDefaultsFromDistance(routeForm.distance);
-          if (defaults) {
-              if (!times208B.ft) setTimes208B(prev => ({ ...prev, ft: defaults.ft208b }));
-              if (!times208B.ct) setTimes208B(prev => ({ ...prev, ct: defaults.ct208b }));
-              if (!times208EX.ft) setTimes208EX(prev => ({ ...prev, ft: defaults.ft208ex }));
-              if (!times208EX.ct) setTimes208EX(prev => ({ ...prev, ct: defaults.ct208ex }));
-          }
-      }
-  }, [routeForm.distance, editingId]); // Run when distance changes, but mostly for new entries
-
   // -- Route Handlers --
 
   const handleEditRoute = (route: RouteDefinition) => {
     setRouteForm(route);
-    setTimes208B({
-        ft: decimalToHm(route.flightTimeC208B),
-        buf: decimalToHm(route.bufferC208B),
-        ct: decimalToHm(route.commercialTimeC208B)
-    });
-    setTimes208EX({
-        ft: decimalToHm(route.flightTimeC208EX),
-        buf: decimalToHm(route.bufferC208EX),
-        ct: decimalToHm(route.commercialTimeC208EX)
-    });
+    setPerfForm({ type: '', ft: '', buf: '', ct: '' }); // Reset sub-form
     setEditingId(route.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleAddPerformance = () => {
+      if (!perfForm.type || !perfForm.ft || !perfForm.ct) return;
+      
+      const newPerf: RoutePerformance = {
+          flightTime: hmToDecimal(perfForm.ft),
+          buffer: hmToDecimal(perfForm.buf),
+          commercialTime: hmToDecimal(perfForm.ct)
+      };
+
+      setRouteForm(prev => ({
+          ...prev,
+          performances: {
+              ...(prev.performances || {}),
+              [perfForm.type]: newPerf
+          }
+      }));
+
+      // Reset form but keep type for quick entry if needed, actually reset all is cleaner
+      setPerfForm({ type: '', ft: '', buf: '', ct: '' });
+  };
+
+  const removePerformance = (typeCode: string) => {
+      setRouteForm(prev => {
+          const newPerfs = { ...(prev.performances || {}) };
+          delete newPerfs[typeCode];
+          return { ...prev, performances: newPerfs };
+      });
+  };
+
+  // Select aircraft type for performance sub-form
+  const handlePerfTypeSelect = (typeCode: string) => {
+      setPerfForm(p => ({ ...p, type: typeCode }));
   };
 
   const handleSaveRoute = async () => {
     if (!routeForm.code) return;
     
+    // Note: Automatic fallback calculation removed as per requirements.
+    // The route will rely on specific performance profiles.
+
     const payload = { 
         ...routeForm, 
-        name: routeForm.to || routeForm.code, 
-        flightTimeC208B: hmToDecimal(times208B.ft),
-        bufferC208B: hmToDecimal(times208B.buf),
-        commercialTimeC208B: hmToDecimal(times208B.ct),
-        flightTimeC208EX: hmToDecimal(times208EX.ft),
-        bufferC208EX: hmToDecimal(times208EX.buf),
-        commercialTimeC208EX: hmToDecimal(times208EX.ct),
-        flightTime: hmToDecimal(times208B.ft)
+        name: routeForm.to || routeForm.code
     };
 
     if (editingId) {
@@ -130,8 +118,7 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
 
   const resetRouteForm = () => {
     setRouteForm({});
-    setTimes208B({ ft: '', buf: '', ct: '' });
-    setTimes208EX({ ft: '', buf: '', ct: '' });
+    setPerfForm({ type: '', ft: '', buf: '', ct: '' });
     setEditingId(null);
   };
 
@@ -171,16 +158,66 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
       setEditingLocationId(null);
   };
 
-  // -- Route Import Logic --
+  // -- Route Import/Export Logic --
 
   const handleDownloadTemplate = () => {
-    const headers = "CODE,FROM,TO,DISTANCE (NM),FT 208B,BUF 208B,COMM 208B,FT 208EX,BUF 208EX,COMM 208EX";
-    const sample = "OGL-KAI,OGL,KAI,125,1:00,0:15,1:15,0:55,0:10,1:05";
+    const staticHeaders = ["CODE", "FROM", "TO", "DISTANCE"];
+    // Generate headers for all known aircraft types
+    const dynamicHeaders = aircraftTypes.flatMap(t => [`${t.code}_FT`, `${t.code}_BUF`, `${t.code}_CT`]);
+    
+    const headers = [...staticHeaders, ...dynamicHeaders].join(",");
+    
+    // Sample row
+    const sampleStatic = ["OGL-KAI", "OGL", "KAI", "125"];
+    const sampleDynamic = aircraftTypes.flatMap(() => ["0:50", "0:15", "1:05"]); // Generic sample times
+    const sample = [...sampleStatic, ...sampleDynamic].join(",");
+
     const csvContent = "data:text/csv;charset=utf-8," + [headers, sample].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", "tga_routes_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportCSV = () => {
+    const staticHeaders = ["CODE", "FROM", "TO", "DISTANCE"];
+    const dynamicHeaders = aircraftTypes.flatMap(t => [`${t.code}_FT`, `${t.code}_BUF`, `${t.code}_CT`]);
+    const headerRow = [...staticHeaders, ...dynamicHeaders].join(",");
+
+    const rows = routes.map(r => {
+        const staticData = [
+            r.code, 
+            r.from || '', 
+            r.to || '', 
+            r.distance || 0
+        ];
+        
+        const dynamicData = aircraftTypes.flatMap(t => {
+            const perf = r.performances?.[t.code];
+            if (perf) {
+                return [
+                    decimalToHm(perf.flightTime), 
+                    decimalToHm(perf.buffer), 
+                    decimalToHm(perf.commercialTime)
+                ];
+            }
+            return ['', '', ''];
+        });
+        
+        return [...staticData, ...dynamicData].join(",");
+    });
+    
+    const csvContent = [headerRow, ...rows].join("\n");
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `tga_routes_export_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -208,50 +245,109 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
   const processCSV = async (csvText: string) => {
     try {
         const lines = csvText.split('\n');
+        if (lines.length < 2) {
+            alert("Empty or invalid CSV file");
+            return;
+        }
+
+        const headers = lines[0].split(',').map(h => h.trim().toUpperCase());
+        
+        // Identify column indices
+        const idxCode = headers.indexOf('CODE');
+        const idxFrom = headers.indexOf('FROM');
+        const idxTo = headers.indexOf('TO');
+        const idxDist = headers.findIndex(h => h.startsWith('DISTANCE')); // Allow 'DISTANCE' or 'DISTANCE (NM)'
+
+        if (idxCode === -1) {
+            alert("Missing required column: CODE");
+            return;
+        }
+
+        // Identify Dynamic Performance Columns
+        // Map: typeCode -> { ft: index, buf: index, ct: index }
+        const typeMappings: Record<string, { ft: number, buf: number, ct: number }> = {};
+        
+        // Scan headers for patterns like TYPE_FT, TYPE_BUF, TYPE_CT
+        headers.forEach((h, index) => {
+            if (h.endsWith('_FT')) {
+                const type = h.replace('_FT', '');
+                if (!typeMappings[type]) typeMappings[type] = { ft: -1, buf: -1, ct: -1 };
+                typeMappings[type].ft = index;
+            } else if (h.endsWith('_BUF')) {
+                const type = h.replace('_BUF', '');
+                if (!typeMappings[type]) typeMappings[type] = { ft: -1, buf: -1, ct: -1 };
+                typeMappings[type].buf = index;
+            } else if (h.endsWith('_CT')) {
+                const type = h.replace('_CT', '');
+                if (!typeMappings[type]) typeMappings[type] = { ft: -1, buf: -1, ct: -1 };
+                typeMappings[type].ct = index;
+            }
+        });
+
         let importedCount = 0;
+        let updatedCount = 0;
+
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
-            const parts = line.split(',');
-            const code = parts[0]?.trim().toUpperCase();
-            const from = parts[1]?.trim().toUpperCase();
-            const to = parts[2]?.trim().toUpperCase(); 
             
+            const parts = line.split(','); // Assumes no commas in fields for now
+            
+            const code = parts[idxCode]?.trim().toUpperCase();
             if (!code) continue;
-            
-            const distance = parseFloat(parts[3]?.trim() || '0');
-            
-            // Auto Calculate Defaults if CSV fields missing but distance exists
-            const defaults = calculateDefaultsFromDistance(distance);
-            
-            let ft208b = hmToDecimal(parts[4]?.trim());
-            let buf208b = hmToDecimal(parts[5]?.trim());
-            let ct208b = hmToDecimal(parts[6]?.trim());
-            let ft208ex = hmToDecimal(parts[7]?.trim());
-            let buf208ex = hmToDecimal(parts[8]?.trim());
-            let ct208ex = hmToDecimal(parts[9]?.trim());
 
-            if (defaults) {
-                if (!ft208b) ft208b = hmToDecimal(defaults.ft208b);
-                if (!ct208b) ct208b = hmToDecimal(defaults.ct208b);
-                if (!ft208ex) ft208ex = hmToDecimal(defaults.ft208ex);
-                if (!ct208ex) ct208ex = hmToDecimal(defaults.ct208ex);
-            }
+            const from = idxFrom !== -1 ? parts[idxFrom]?.trim().toUpperCase() : undefined;
+            const to = idxTo !== -1 ? parts[idxTo]?.trim().toUpperCase() : undefined;
+            const distance = idxDist !== -1 ? parseFloat(parts[idxDist]?.trim() || '0') : 0;
+
+            // Build Performance Object
+            const performances: Record<string, RoutePerformance> = {};
             
-            const exists = routes.some(r => r.code === code);
-            if (!exists) {
-                await onAddRoute({ 
-                    name: to, 
-                    code, from, to, distance, 
-                    flightTime: ft208b, 
-                    flightTimeC208B: ft208b, bufferC208B: buf208b, commercialTimeC208B: ct208b,
-                    flightTimeC208EX: ft208ex, bufferC208EX: buf208ex, commercialTimeC208EX: ct208ex
-                });
+            Object.keys(typeMappings).forEach(type => {
+                const indices = typeMappings[type];
+                const ftStr = indices.ft !== -1 ? parts[indices.ft]?.trim() : '';
+                const bufStr = indices.buf !== -1 ? parts[indices.buf]?.trim() : '';
+                const ctStr = indices.ct !== -1 ? parts[indices.ct]?.trim() : '';
+
+                if (ftStr || bufStr || ctStr) {
+                    performances[type] = {
+                        flightTime: hmToDecimal(ftStr),
+                        buffer: hmToDecimal(bufStr),
+                        commercialTime: hmToDecimal(ctStr)
+                    };
+                }
+            });
+
+            // Note: Automatic fallback calculation removed.
+            
+            const routePayload: any = {
+                code,
+                name: to || code, // Fallback name
+                distance
+            };
+            if(from) routePayload.from = from;
+            if(to) routePayload.to = to;
+            if(Object.keys(performances).length > 0) routePayload.performances = performances;
+
+            // Check if exists
+            const existingRoute = routes.find(r => r.code === code);
+            if (existingRoute) {
+                const mergedPerformances = { ...(existingRoute.performances || {}), ...performances };
+                
+                const updatePayload = {
+                    ...routePayload,
+                    performances: mergedPerformances
+                };
+                
+                await onUpdateRoute(existingRoute.id, updatePayload);
+                updatedCount++;
+            } else {
+                await onAddRoute(routePayload);
                 importedCount++;
             }
         }
-        if (importedCount > 0) alert(`Successfully imported ${importedCount} new routes.`);
-        else alert("No new routes found in the file.");
+        
+        alert(`Import Complete:\nAdded: ${importedCount} routes\nUpdated: ${updatedCount} routes`);
     } catch (error) {
         console.error("Import error:", error);
         alert("Error processing CSV file. Please check the format.");
@@ -302,17 +398,13 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
             
             const parts = line.split(',');
             const code = parts[0]?.trim().toUpperCase();
-            // Handle names that might contain commas if they weren't strictly quoted
             const name = parts.slice(1).join(',').trim().replace(/^"|"$/g, '');
             
             if (!code || !name) continue;
             
             const exists = locations.some(l => l.code === code);
             if (!exists && onAddLocation) {
-                await onAddLocation({ 
-                    code, 
-                    name
-                });
+                await onAddLocation({ code, name });
                 importedCount++;
             }
         }
@@ -349,7 +441,7 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
       return l.name.toLowerCase().includes(term) || l.code.toLowerCase().includes(term);
   });
 
-  // Pagination for Routes
+  // Pagination
   const totalPages = Math.ceil(filteredRoutes.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedRoutes = filteredRoutes.slice(startIndex, startIndex + itemsPerPage);
@@ -360,7 +452,6 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
     }
   };
 
-  // Pagination for Locations
   const totalLocationPages = Math.ceil(filteredLocations.length / itemsPerLocationPage);
   const startLocationIndex = (currentLocationPage - 1) * itemsPerLocationPage;
   const paginatedLocations = filteredLocations.slice(startLocationIndex, startLocationIndex + itemsPerLocationPage);
@@ -369,20 +460,6 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
     if (newPage >= 1 && newPage <= totalLocationPages) {
         setCurrentLocationPage(newPage);
     }
-  };
-
-  const formatRouteDisplay = (code: string) => {
-    if (code.includes('-')) {
-      const parts = code.split('-');
-      return (
-        <div className="flex items-center gap-1.5">
-          <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-xs border border-slate-200">{parts[0]}</span>
-          <ArrowRight size={12} className="text-slate-400" />
-          <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-xs border border-slate-200">{parts[1]}</span>
-        </div>
-      );
-    }
-    return <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-xs border border-slate-200">{code}</span>;
   };
 
   const inputClass = "w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none font-medium placeholder:text-slate-400";
@@ -395,7 +472,7 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
         <div className="max-w-7xl mx-auto p-4 lg:p-8 pb-32 animate-in fade-in duration-300">
             <header className="mb-8">
                 <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">Route Management</h1>
-                <p className="text-slate-500 mt-1">Configure flight routes, locations, and performance data.</p>
+                <p className="text-slate-500 mt-1">Configure flight routes, locations, and aircraft performance data.</p>
             </header>
 
             {/* Sub Navigation */}
@@ -434,6 +511,9 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
                                     <button onClick={handleDownloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-100 rounded-lg transition-all">
                                         <FileSpreadsheet size={14} /> <span>Template</span>
                                     </button>
+                                    <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-100 rounded-lg transition-all">
+                                        <Download size={14} /> <span>Export</span>
+                                    </button>
                                     <div className="relative">
                                         <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={isImporting} />
                                         <button className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 rounded-lg shadow-sm transition-all ${isImporting ? 'opacity-70 cursor-wait' : ''}`}>
@@ -448,10 +528,9 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
                             )}
                         </div>
 
-                        {/* Route Form Content... (omitted for brevity, assume existing) */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-5 items-start relative z-10">
                             {/* Basic Info */}
-                            <div className="space-y-4">
+                            <div className="space-y-4 md:col-span-1">
                                 <div>
                                     <label className={labelClass}>Route Code</label>
                                     <div className="relative">
@@ -475,44 +554,77 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
                                 </div>
                             </div>
 
-                            {/* C208B Data */}
-                            <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 space-y-3">
-                                <h4 className="text-xs font-bold text-emerald-800 uppercase border-b border-emerald-200 pb-2 mb-3">C208B Performance</h4>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Flight Time</label>
-                                    <input placeholder="H:MM" className="w-full px-3 py-2 text-sm bg-white border border-emerald-200 rounded text-center font-mono focus:ring-2 focus:ring-emerald-500 outline-none" value={times208B.ft} onChange={e => setTimes208B(p => ({ ...p, ft: e.target.value }))} />
+                            {/* Dynamic Performance Section */}
+                            <div className="md:col-span-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
+                                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                                    <Globe size={14} /> Performance Profiles
+                                </h4>
+                                
+                                {/* Performance Input Row */}
+                                <div className="grid grid-cols-12 gap-3 mb-4 items-end bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+                                    <div className="col-span-3">
+                                        <label className={labelClass}>Aircraft Type</label>
+                                        <select 
+                                            className={inputClass} 
+                                            value={perfForm.type} 
+                                            onChange={e => handlePerfTypeSelect(e.target.value)}
+                                        >
+                                            <option value="">Select Type...</option>
+                                            {aircraftTypes.map(t => <option key={t.id} value={t.code}>{t.code}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className={labelClass}>Flight Time</label>
+                                        <input placeholder="H:MM" className={`${inputClass} text-center`} value={perfForm.ft} onChange={e => setPerfForm(p => ({ ...p, ft: e.target.value }))} />
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className={labelClass}>Buffer</label>
+                                        <input placeholder="H:MM" className={`${inputClass} text-center`} value={perfForm.buf} onChange={e => setPerfForm(p => ({ ...p, buf: e.target.value }))} />
+                                    </div>
+                                    <div className="col-span-2">
+                                        <label className={labelClass}>Comm Time</label>
+                                        <input placeholder="H:MM" className={`${inputClass} text-center font-bold text-blue-700`} value={perfForm.ct} onChange={e => setPerfForm(p => ({ ...p, ct: e.target.value }))} />
+                                    </div>
+                                    <div className="col-span-3">
+                                        <button onClick={handleAddPerformance} className="w-full h-[42px] bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs shadow-sm transition-all flex items-center justify-center gap-1">
+                                            <Plus size={14} /> Add Profile
+                                        </button>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Comm Buffer</label>
-                                    <input placeholder="H:MM" className="w-full px-3 py-2 text-sm bg-white border border-emerald-200 rounded text-center font-mono focus:ring-2 focus:ring-emerald-500 outline-none" value={times208B.buf} onChange={e => setTimes208B(p => ({ ...p, buf: e.target.value }))} />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Commercial Time</label>
-                                    <input placeholder="H:MM" className="w-full px-3 py-2 text-sm bg-white border border-emerald-200 rounded text-center font-mono font-bold text-emerald-900 focus:ring-2 focus:ring-emerald-500 outline-none" value={times208B.ct} onChange={e => setTimes208B(p => ({ ...p, ct: e.target.value }))} />
-                                </div>
-                            </div>
 
-                            {/* C208EX Data */}
-                            <div className="p-4 bg-sky-50 rounded-xl border border-sky-100 space-y-3">
-                                <h4 className="text-xs font-bold text-sky-800 uppercase border-b border-sky-200 pb-2 mb-3">C208EX Performance</h4>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-sky-700 uppercase mb-1">Flight Time</label>
-                                    <input placeholder="H:MM" className="w-full px-3 py-2 text-sm bg-white border border-sky-200 rounded text-center font-mono focus:ring-2 focus:ring-sky-500 outline-none" value={times208EX.ft} onChange={e => setTimes208EX(p => ({ ...p, ft: e.target.value }))} />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-sky-700 uppercase mb-1">Comm Buffer</label>
-                                    <input placeholder="H:MM" className="w-full px-3 py-2 text-sm bg-white border border-sky-200 rounded text-center font-mono focus:ring-2 focus:ring-sky-500 outline-none" value={times208EX.buf} onChange={e => setTimes208EX(p => ({ ...p, buf: e.target.value }))} />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-sky-700 uppercase mb-1">Commercial Time</label>
-                                    <input placeholder="H:MM" className="w-full px-3 py-2 text-sm bg-white border border-sky-200 rounded text-center font-mono font-bold text-sky-900 focus:ring-2 focus:ring-sky-500 outline-none" value={times208EX.ct} onChange={e => setTimes208EX(p => ({ ...p, ct: e.target.value }))} />
+                                {/* Active Profiles List */}
+                                <div className="space-y-2">
+                                    {routeForm.performances && Object.keys(routeForm.performances).length > 0 ? (
+                                        Object.entries(routeForm.performances).map(([typeCode, p]) => {
+                                            const perf = p as RoutePerformance;
+                                            return (
+                                                <div key={typeCode} className="flex items-center justify-between bg-white px-4 py-2 rounded-lg border border-slate-200">
+                                                    <div className="flex items-center gap-4">
+                                                        <span className="font-bold text-slate-800 bg-slate-100 px-2 py-1 rounded text-xs">{typeCode}</span>
+                                                        <div className="flex gap-4 text-xs font-mono text-slate-600">
+                                                            <span>FT: {decimalToHm(perf.flightTime)}</span>
+                                                            <span>BUF: {decimalToHm(perf.buffer)}</span>
+                                                            <span className="font-bold text-blue-700">CT: {decimalToHm(perf.commercialTime)}</span>
+                                                        </div>
+                                                    </div>
+                                                    <button onClick={() => removePerformance(typeCode)} className="text-slate-400 hover:text-red-500 transition-colors p-1">
+                                                        <X size={14} />
+                                                    </button>
+                                                </div>
+                                            );
+                                        })
+                                    ) : (
+                                        <div className="text-center py-4 text-slate-400 text-xs italic bg-slate-100/50 rounded-lg border border-dashed border-slate-300">
+                                            No performance profiles configured for this route yet.
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
                             {/* Action */}
-                            <div className="flex flex-col justify-end h-full">
-                                <button onClick={handleSaveRoute} className={`w-full h-12 rounded-xl text-sm font-bold shadow-md flex items-center justify-center gap-2 transition-all transform active:scale-95 ${editingId ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200' : 'bg-slate-900 hover:bg-slate-800 text-white shadow-slate-200'}`}>
-                                    {editingId ? <><Save size={18} /> Update Route</> : <><Plus size={18} /> Add Route</>}
+                            <div className="md:col-span-4 flex justify-end mt-2">
+                                <button onClick={handleSaveRoute} className={`px-8 py-3 rounded-xl text-sm font-bold shadow-md flex items-center justify-center gap-2 transition-all transform active:scale-95 ${editingId ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200' : 'bg-slate-900 hover:bg-slate-800 text-white shadow-slate-200'}`}>
+                                    {editingId ? <><Save size={18} /> Update Route Definition</> : <><Plus size={18} /> Save New Route</>}
                                 </button>
                             </div>
                         </div>
@@ -532,10 +644,7 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
                                         <th className={thClass}>From</th>
                                         <th className={thClass}>To</th>
                                         <th className={thClass}>Distance (nm)</th>
-                                        <th className={`${thClass} bg-emerald-50 text-emerald-700 border-l border-emerald-100`}>FT 208B</th>
-                                        <th className={`${thClass} bg-emerald-50 text-emerald-700`}>Comm 208B</th>
-                                        <th className={`${thClass} bg-sky-50 text-sky-700 border-l border-sky-100`}>FT 208EX</th>
-                                        <th className={`${thClass} bg-sky-50 text-sky-700`}>Comm 208EX</th>
+                                        <th className={thClass}>Configured Aircraft</th>
                                         <th className={`${thClass} text-right`}>Actions</th>
                                     </tr>
                                 </thead>
@@ -543,6 +652,7 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
                                     {paginatedRoutes.map(route => {
                                         const fromDisplay = route.from || (route.code.includes('-') ? route.code.split('-')[0] : route.code);
                                         const toDisplay = route.to || (route.code.includes('-') ? route.code.split('-')[1] : '');
+                                        const profiles = route.performances ? Object.keys(route.performances) : [];
 
                                         return (
                                             <tr key={route.id} className="group hover:bg-slate-50 transition-colors">
@@ -553,18 +663,12 @@ export const RouteManager: React.FC<RouteManagerProps> = ({
                                                 <td className={tdClass}><span className="font-bold text-slate-700">{toDisplay}</span></td>
                                                 <td className={tdClass}><span className="font-mono text-slate-600">{route.distance || '--'}</span></td>
                                                 
-                                                <td className={`${tdClass} border-l border-slate-100 bg-emerald-50/30`}>
-                                                    <span className="font-mono text-emerald-900">{decimalToHm(route.flightTimeC208B) || '--'}</span>
-                                                </td>
-                                                <td className={`${tdClass} bg-emerald-50/30`}>
-                                                    <span className="font-mono font-bold text-emerald-800">{decimalToHm(route.commercialTimeC208B) || '--'}</span>
-                                                </td>
-
-                                                <td className={`${tdClass} border-l border-slate-100 bg-sky-50/30`}>
-                                                    <span className="font-mono text-sky-900">{decimalToHm(route.flightTimeC208EX) || '--'}</span>
-                                                </td>
-                                                <td className={`${tdClass} bg-sky-50/30`}>
-                                                    <span className="font-mono font-bold text-sky-800">{decimalToHm(route.commercialTimeC208EX) || '--'}</span>
+                                                <td className={tdClass}>
+                                                    <div className="flex gap-1 flex-wrap">
+                                                        {profiles.length > 0 ? profiles.map(p => (
+                                                            <span key={p} className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded uppercase">{p}</span>
+                                                        )) : <span className="text-slate-300 text-xs italic">Default Only</span>}
+                                                    </div>
                                                 </td>
 
                                                 <td className={`${tdClass} text-right`}>

@@ -5,6 +5,7 @@ import { X, Save, Plane, Calendar, Clock, User, MapPin, ChevronDown, ArrowRightL
 import { fetchCrewTrainingRecords } from '../services/firebase';
 import { useAppData } from '../context/DataContext';
 import { z } from 'zod';
+import { decimalToHm } from '../utils/calculations';
 
 interface FlightModalProps {
   isOpen: boolean;
@@ -47,19 +48,76 @@ export const FlightModal: React.FC<FlightModalProps> = ({
   flights,
   features
 }) => {
-  const { aircraftTypes } = useAppData();
+  const { aircraftTypes, routes } = useAppData();
   const [formData, setFormData] = useState<Partial<Flight>>({
     flightNumber: '', date: '', route: '', aircraftRegistration: '', aircraftType: 'C208B', etd: '', flightTime: 0, commercialTime: '', pic: '', sic: '', customer: '', customerId: '', status: 'Scheduled', notes: ''
   });
 
   const [createReturn, setCreateReturn] = useState(false);
-  const [turnaroundMin, setTurnaroundMin] = useState(30);
   
   // Safety & Validation State
   const [warnings, setWarnings] = useState<string[]>([]);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   
   const [loading, setLoading] = useState(false);
+
+  // --- AUTOMATED COMMERCIAL TIME LOOKUP ---
+  useEffect(() => {
+      // Only run auto-calculation if route and aircraft info is present, and we are NOT editing an existing valid commercial time (unless the route changed)
+      if (formData.route && formData.aircraftType) {
+          const code = formData.route.toUpperCase();
+          const type = formData.aircraftType;
+          
+          // Sanitize: Remove hyphens for lookup match against DB
+          const cleanCode = code.replace(/-/g, '');
+          
+          // Create reverse logic
+          let reverseCode = '';
+          if (code.includes('-')) {
+              // If we have a hyphen, split and swap
+              const parts = code.split('-');
+              if (parts.length === 2) {
+                  reverseCode = (parts[1] + parts[0]).replace(/-/g, '');
+              }
+          } else if (cleanCode.length === 6) {
+              // If no hyphen, assume standard 3-letter IATA pair (e.g. OGLKAM -> KAMOGL)
+              reverseCode = cleanCode.slice(3) + cleanCode.slice(0, 3);
+          }
+          
+          const matchedRoute = routes.find(r => r.code === cleanCode) || 
+                               (reverseCode ? routes.find(r => r.code === reverseCode) : undefined);
+
+          if (matchedRoute) {
+             let decimalTime = 0;
+             // DYNAMIC LOOKUP based on new RoutePerformance structure
+             if (matchedRoute.performances && matchedRoute.performances[type]) {
+                 decimalTime = matchedRoute.performances[type].commercialTime;
+             } else {
+                 // Fallback to legacy default if available
+                 decimalTime = matchedRoute.flightTime || 0;
+             }
+
+             if (decimalTime > 0) {
+                 const newTime = decimalToHm(decimalTime);
+                 // Only update if different to avoid loop, and prioritize the calculated one
+                 if (formData.commercialTime !== newTime) {
+                     setFormData(prev => ({ ...prev, commercialTime: newTime }));
+                 }
+             }
+          }
+      }
+  }, [formData.route, formData.aircraftType, routes]);
+
+  // Update Aircraft Type when Registration Changes
+  useEffect(() => {
+      if (formData.aircraftRegistration) {
+          const matchedAircraft = fleet.find(f => f.registration === formData.aircraftRegistration);
+          if (matchedAircraft && matchedAircraft.type !== formData.aircraftType) {
+              setFormData(prev => ({ ...prev, aircraftType: matchedAircraft.type }));
+          }
+      }
+  }, [formData.aircraftRegistration, fleet]);
+
 
   // --- EXISTING LOGIC (Smart Dispatch) ---
   const validatePilot = async (crewCode: string, date: string, flightDuration: number) => {
@@ -155,10 +213,20 @@ export const FlightModal: React.FC<FlightModalProps> = ({
     return num;
   };
 
-  const calculateReturnETD = (etd: string, durationHrs: number, turnMin: number) => {
+  const calculateReturnETD = (etd: string, commTime: string | undefined, flightTime: number) => {
     if (!etd) return '';
     const [h, m] = etd.split(':').map(Number);
-    const totalMinutes = (h * 60) + m + (durationHrs * 60) + turnMin;
+    
+    // Determine duration in minutes: prefer Commercial Time, fallback to Flight Time
+    let durationMin = 0;
+    if (commTime && commTime.includes(':')) {
+        const [ch, cm] = commTime.split(':').map(Number);
+        if (!isNaN(ch)) durationMin = (ch * 60) + (cm || 0);
+    } else {
+        durationMin = (flightTime || 0) * 60;
+    }
+
+    const totalMinutes = (h * 60) + m + durationMin;
     const newH = Math.floor(totalMinutes / 60) % 24;
     const newM = Math.floor(totalMinutes % 60);
     return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
@@ -199,14 +267,42 @@ export const FlightModal: React.FC<FlightModalProps> = ({
       await onSave(outboundFlight);
 
       if (createReturn && !editingFlight) {
+        // 2a. Determine return route
+        const returnRoute = generateReturnRoute(outboundFlight.route);
+        
+        // 2b. Auto-fill Commercial Time for return flight
+        let returnCommTime = '';
+        if (returnRoute) {
+             const cleanCode = returnRoute.replace(/-/g, '');
+             let reverseCode = '';
+             if (cleanCode.length === 6) {
+                 reverseCode = cleanCode.slice(3) + cleanCode.slice(0, 3);
+             }
+    
+             const matchedRoute = routes.find(r => r.code === cleanCode) || 
+                                  (reverseCode ? routes.find(r => r.code === reverseCode) : undefined);
+             
+             if (matchedRoute) {
+                 const type = outboundFlight.aircraftType;
+                 let decimalTime = 0;
+                 if (matchedRoute.performances && matchedRoute.performances[type]) {
+                     decimalTime = matchedRoute.performances[type].commercialTime;
+                 } else {
+                     decimalTime = matchedRoute.flightTime || 0;
+                 }
+    
+                 if (decimalTime > 0) returnCommTime = decimalToHm(decimalTime);
+             }
+        }
+
         const returnFlight: Omit<Flight, 'id'> = {
             ...outboundFlight,
             flightNumber: generateReturnFlightNumber(outboundFlight.flightNumber),
-            route: generateReturnRoute(outboundFlight.route),
-            etd: calculateReturnETD(outboundFlight.etd, outboundFlight.flightTime || 0, turnaroundMin),
+            route: returnRoute,
+            etd: calculateReturnETD(outboundFlight.etd, outboundFlight.commercialTime, outboundFlight.flightTime || 0),
             status: 'Scheduled',
             notes: `Return leg of ${outboundFlight.flightNumber}`,
-            commercialTime: '' 
+            commercialTime: returnCommTime 
         };
         await onSave(returnFlight);
       }
@@ -410,14 +506,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
 
                     {createReturn && (
                         <div className="mt-4 pt-4 border-t border-indigo-100 animate-in slide-in-from-top-2">
-                             <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className={labelClass}>Turnaround (Mins)</label>
-                                    <div className="relative">
-                                        <Timer className={iconClass} size={18} />
-                                        <input type="number" value={turnaroundMin} onChange={(e) => setTurnaroundMin(Number(e.target.value))} className={inputClass} min="15" step="5" />
-                                    </div>
-                                </div>
+                             <div className="grid grid-cols-1 gap-4">
                                 <div>
                                     <label className={labelClass}>Return Preview</label>
                                     <div className="text-xs font-mono bg-white border border-indigo-100 rounded-lg p-3 text-indigo-700">
@@ -426,7 +515,7 @@ export const FlightModal: React.FC<FlightModalProps> = ({
                                             <span className="font-bold">{generateReturnFlightNumber(formData.flightNumber || '---')}</span>
                                         </div>
                                         <div className="mt-1 font-bold">
-                                            ETD: {calculateReturnETD(formData.etd || '', formData.flightTime || 0, turnaroundMin)}
+                                            ETD: {calculateReturnETD(formData.etd || '', formData.commercialTime, formData.flightTime || 0)}
                                         </div>
                                     </div>
                                 </div>

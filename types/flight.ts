@@ -30,6 +30,12 @@ export interface Flight {
   voyageReportStatus?: 'Pending' | 'Filed'; // Tracking status
 }
 
+export interface RoutePerformance {
+  flightTime: number;      // Decimal hours
+  buffer: number;          // Decimal hours
+  commercialTime: number;  // Decimal hours
+}
+
 export interface RouteDefinition {
   id: string;
   code: string; // e.g., OGL-KAI
@@ -37,20 +43,10 @@ export interface RouteDefinition {
   from?: string; // e.g. OGL
   to?: string;   // e.g. Kaieteur Falls or KAI
   distance?: number;
-  flightTime?: number; // Legacy/Default (C208B)
+  flightTime?: number; // Fallback/Average Flight Time
   
-  // Specifics
-  flightTimeC208B?: number;
-  bufferC208B?: number;
-  commercialTimeC208B?: number;
-  
-  flightTimeC208EX?: number;
-  bufferC208EX?: number;
-  commercialTimeC208EX?: number;
-  
-  flightTime1900D?: number;
-  buffer1900D?: number;
-  commercialTime1900D?: number;
+  // Dynamic performance map keyed by AircraftType.code (e.g. 'C208B', '1900D')
+  performances?: Record<string, RoutePerformance>;
 }
 
 export interface LocationDefinition {

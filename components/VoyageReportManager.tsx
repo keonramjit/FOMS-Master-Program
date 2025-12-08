@@ -35,6 +35,7 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
   useEffect(() => {
       const newEdits: Record<string, FlightEditState> = {};
       flights.forEach(f => {
+          // Ensure we initialize with empty strings to prevent controlled/uncontrolled warnings and default browser time values
           newEdits[f.id] = {
               outTime: f.outTime || '',
               offTime: f.offTime || '',
@@ -79,6 +80,25 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
       setSaveSuccess(false);
   };
 
+  const handleTimeBlur = (flightId: string, field: keyof FlightEditState, value: string) => {
+      let formatted = value.trim();
+      // Remove non-digits except colon
+      formatted = formatted.replace(/[^0-9:]/g, '');
+      
+      // Handle 3 or 4 digits raw (e.g. 800 -> 08:00, 1430 -> 14:30)
+      if (!formatted.includes(':') && formatted.length >= 3 && formatted.length <= 4) {
+          if (formatted.length === 3) formatted = '0' + formatted; // 830 -> 0830
+          formatted = formatted.slice(0, 2) + ':' + formatted.slice(2);
+      }
+      
+      // Handle simple hours (e.g. 8 -> 08:00, 14 -> 14:00)
+      if (!formatted.includes(':') && formatted.length > 0 && formatted.length <= 2) {
+          formatted = formatted.padStart(2, '0') + ':00';
+      }
+  
+      handleEdit(flightId, field, formatted);
+  };
+
   const handleSave = async () => {
       setIsSaving(true);
       try {
@@ -86,7 +106,7 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
               const edit = edits[f.id];
               if (!edit) return Promise.resolve();
 
-              // Calculate finals
+              // Calculate finals (Decimal hours for database/analytics)
               const actualFlightTime = calculateDuration(edit.offTime, edit.onTime);
               const actualBlockTime = calculateDuration(edit.outTime, edit.inTime);
 
@@ -114,9 +134,28 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
       }
   };
 
+  // --- Helpers for H:MM Display ---
+  const getMinutesDiff = (start: string, end: string): number => {
+      if (!start || !end) return 0;
+      const [h1, m1] = start.split(':').map(Number);
+      const [h2, m2] = end.split(':').map(Number);
+      if (isNaN(h1) || isNaN(m1) || isNaN(h2) || isNaN(m2)) return 0;
+      
+      let diff = (h2 * 60 + m2) - (h1 * 60 + m1);
+      if (diff < 0) diff += 24 * 60; // Handle midnight crossing
+      return diff;
+  };
+
+  const formatDuration = (minutes: number): string => {
+      if (minutes <= 0) return '';
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      return `${h}:${m.toString().padStart(2, '0')}`;
+  };
+
   // --- Styles ---
   const inputCellClass = "p-1 border-r border-slate-100 last:border-r-0";
-  const inputClass = "w-full text-center font-mono font-bold text-sm bg-transparent border border-transparent rounded focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all py-2 text-slate-700 placeholder:text-slate-200 hover:bg-slate-50";
+  const inputClass = "w-full text-center font-mono font-bold text-sm bg-transparent border border-transparent rounded focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all py-2 text-slate-700 placeholder:text-slate-300 hover:bg-slate-50";
   const calcCellClass = "px-2 py-3 text-center font-mono font-bold text-sm border-r border-white/50";
   const superHeaderClass = "px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center border-l border-slate-200 first:border-l-0 bg-slate-50/80";
   const subHeaderClass = "px-2 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide text-center border-t border-slate-200";
@@ -223,7 +262,7 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
                                             <th className={superHeaderClass} colSpan={1}>Identity</th>
                                             <th className={superHeaderClass} colSpan={2}>Crew</th>
                                             <th className={`${superHeaderClass} bg-blue-50/30 text-blue-600`} colSpan={4}>Block Times (Local)</th>
-                                            <th className={`${superHeaderClass} bg-emerald-50/30 text-emerald-600`} colSpan={2}>Duration</th>
+                                            <th className={`${superHeaderClass} bg-emerald-50/30 text-emerald-600`} colSpan={2}>Duration (H:MM)</th>
                                             <th className={superHeaderClass} colSpan={1}>Notes</th>
                                         </tr>
                                         {/* Column Header */}
@@ -257,8 +296,11 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
                                         ) : (
                                             aircraftFlights.map((flight) => {
                                                 const edit = edits[flight.id] || { outTime: '', offTime: '', onTime: '', inTime: '', notes: '' };
-                                                const fTime = calculateDuration(edit.offTime, edit.onTime);
-                                                const cTime = calculateDuration(edit.outTime, edit.inTime);
+                                                
+                                                // Calculate minutes directly for H:MM display
+                                                const flightMinutes = getMinutesDiff(edit.offTime, edit.onTime);
+                                                const blockMinutes = getMinutesDiff(edit.outTime, edit.inTime);
+                                                
                                                 const routeParts = flight.route.split('-');
 
                                                 return (
@@ -290,17 +332,57 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
                                                         </td>
 
                                                         {/* Times Inputs */}
-                                                        <td className={inputCellClass}><input type="time" className={inputClass} value={edit.outTime} onChange={e => handleEdit(flight.id, 'outTime', e.target.value)} placeholder="--:--" /></td>
-                                                        <td className={inputCellClass}><input type="time" className={inputClass} value={edit.offTime} onChange={e => handleEdit(flight.id, 'offTime', e.target.value)} placeholder="--:--" /></td>
-                                                        <td className={inputCellClass}><input type="time" className={inputClass} value={edit.onTime} onChange={e => handleEdit(flight.id, 'onTime', e.target.value)} placeholder="--:--" /></td>
-                                                        <td className={`${inputCellClass} border-r border-slate-200`}><input type="time" className={inputClass} value={edit.inTime} onChange={e => handleEdit(flight.id, 'inTime', e.target.value)} placeholder="--:--" /></td>
+                                                        <td className={inputCellClass}>
+                                                            <input 
+                                                                type="text" 
+                                                                className={inputClass} 
+                                                                value={edit.outTime} 
+                                                                onChange={e => handleEdit(flight.id, 'outTime', e.target.value)} 
+                                                                onBlur={e => handleTimeBlur(flight.id, 'outTime', e.target.value)}
+                                                                placeholder="-" 
+                                                                maxLength={5}
+                                                            />
+                                                        </td>
+                                                        <td className={inputCellClass}>
+                                                            <input 
+                                                                type="text" 
+                                                                className={inputClass} 
+                                                                value={edit.offTime} 
+                                                                onChange={e => handleEdit(flight.id, 'offTime', e.target.value)} 
+                                                                onBlur={e => handleTimeBlur(flight.id, 'offTime', e.target.value)}
+                                                                placeholder="-" 
+                                                                maxLength={5}
+                                                            />
+                                                        </td>
+                                                        <td className={inputCellClass}>
+                                                            <input 
+                                                                type="text" 
+                                                                className={inputClass} 
+                                                                value={edit.onTime} 
+                                                                onChange={e => handleEdit(flight.id, 'onTime', e.target.value)} 
+                                                                onBlur={e => handleTimeBlur(flight.id, 'onTime', e.target.value)}
+                                                                placeholder="-" 
+                                                                maxLength={5}
+                                                            />
+                                                        </td>
+                                                        <td className={`${inputCellClass} border-r border-slate-200`}>
+                                                            <input 
+                                                                type="text" 
+                                                                className={inputClass} 
+                                                                value={edit.inTime} 
+                                                                onChange={e => handleEdit(flight.id, 'inTime', e.target.value)} 
+                                                                onBlur={e => handleTimeBlur(flight.id, 'inTime', e.target.value)}
+                                                                placeholder="-" 
+                                                                maxLength={5}
+                                                            />
+                                                        </td>
 
-                                                        {/* Calculations */}
+                                                        {/* Calculations (Formatted H:MM) */}
                                                         <td className={`${calcCellClass} bg-emerald-50/40 text-emerald-700`}>
-                                                            {fTime > 0 ? fTime.toFixed(2) : <span className="text-emerald-200">-</span>}
+                                                            {flightMinutes > 0 ? formatDuration(flightMinutes) : <span className="text-emerald-200">-</span>}
                                                         </td>
                                                         <td className={`${calcCellClass} bg-blue-50/40 text-blue-700 border-r border-slate-200`}>
-                                                            {cTime > 0 ? cTime.toFixed(2) : <span className="text-blue-200">-</span>}
+                                                            {blockMinutes > 0 ? formatDuration(blockMinutes) : <span className="text-blue-200">-</span>}
                                                         </td>
 
                                                         {/* Notes */}
@@ -328,18 +410,18 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
                                                 </td>
                                                 <td className="px-2 py-4 text-center">
                                                     <div className="bg-emerald-100 text-emerald-800 font-black font-mono text-lg py-1 px-3 rounded-lg border border-emerald-200 shadow-sm inline-block min-w-[80px]">
-                                                        {aircraftFlights.reduce((acc, f) => {
+                                                        {formatDuration(aircraftFlights.reduce((acc, f) => {
                                                             const edit = edits[f.id];
-                                                            return acc + (edit ? calculateDuration(edit.offTime, edit.onTime) : 0);
-                                                        }, 0).toFixed(2)}
+                                                            return acc + (edit ? getMinutesDiff(edit.offTime, edit.onTime) : 0);
+                                                        }, 0))}
                                                     </div>
                                                 </td>
                                                 <td className="px-2 py-4 text-center border-r border-slate-200">
                                                     <div className="bg-blue-100 text-blue-800 font-black font-mono text-lg py-1 px-3 rounded-lg border border-blue-200 shadow-sm inline-block min-w-[80px]">
-                                                        {aircraftFlights.reduce((acc, f) => {
+                                                        {formatDuration(aircraftFlights.reduce((acc, f) => {
                                                             const edit = edits[f.id];
-                                                            return acc + (edit ? calculateDuration(edit.outTime, edit.inTime) : 0);
-                                                        }, 0).toFixed(2)}
+                                                            return acc + (edit ? getMinutesDiff(edit.outTime, edit.inTime) : 0);
+                                                        }, 0))}
                                                     </div>
                                                 </td>
                                                 <td></td>

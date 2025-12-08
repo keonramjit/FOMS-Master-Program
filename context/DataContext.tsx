@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { 
   Flight, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, 
@@ -165,9 +164,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setLocations([]);
         setCustomers([]);
         setAircraftTypes([
-            { id: '1', code: 'C208B', name: 'Cessna Grand Caravan', icao: 'C208' },
-            { id: '2', code: 'C208EX', name: 'Cessna Grand Caravan EX', icao: 'C208' },
-            { id: '3', code: '1900D', name: 'Beechcraft 1900D', icao: 'B190' }
+            { id: '1', code: 'C208B', name: 'Cessna Grand Caravan', icao: 'C208', displayOrder: 1 },
+            { id: '2', code: 'C208EX', name: 'Cessna Grand Caravan EX', icao: 'C208', displayOrder: 2 },
+            { id: '3', code: '1900D', name: 'Beechcraft 1900D', icao: 'B190', displayOrder: 3 }
         ]);
         return;
     }

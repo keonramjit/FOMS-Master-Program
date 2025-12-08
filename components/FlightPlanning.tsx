@@ -4,6 +4,7 @@ import { Flight, Aircraft, CrewMember, RouteDefinition, CustomerDefinition, Airc
 import { CalendarWidget } from './CalendarWidget';
 import { Plus, Trash2, MapPin, User, Hash, Clock, RefreshCw, CheckCircle2, Plane, Save, ChevronDown, Activity, FileDown, ArrowRightLeft, AlertCircle } from 'lucide-react';
 import { syncFlightSchedule } from '../services/firebase';
+import { decimalToHm } from '../utils/calculations';
 
 interface FlightPlanningProps {
   currentDate: string;
@@ -185,6 +186,8 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
 
   const handleAddReturn = (sourceFlight: Flight) => {
     setHasUnsavedChanges(true);
+    
+    // 1. Determine Return Route
     let newRoute = '';
     if (sourceFlight.route) {
         if (sourceFlight.route.includes('-')) {
@@ -203,17 +206,53 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
         newFlightNum = `${prefix}${currentNum + 10}`;
     }
 
+    // 2. Calculate ETD using Commercial Time
+    // Logic: Outbound ETD + Outbound C/Time (Turnaround already included in C/Time)
     let newEtd = '';
     if (sourceFlight.etd) {
         const [h, m] = sourceFlight.etd.split(':').map(Number);
         if (!isNaN(h) && !isNaN(m)) {
-             const flightDurationMinutes = (sourceFlight.flightTime || 0) * 60;
-             const turnaroundMinutes = 30; 
-             const totalMinutes = (h * 60) + m + flightDurationMinutes + turnaroundMinutes;
+             let durationMinutes = 0;
+             // Prefer commercial time if valid HH:MM
+             if (sourceFlight.commercialTime && sourceFlight.commercialTime.includes(':')) {
+                 const [ch, cm] = sourceFlight.commercialTime.split(':').map(Number);
+                 if (!isNaN(ch)) durationMinutes = (ch * 60) + (cm || 0);
+             } else {
+                 // Fallback to flightTime (decimal hours)
+                 durationMinutes = (sourceFlight.flightTime || 0) * 60;
+             }
+
+             const totalMinutes = (h * 60) + m + durationMinutes;
              const newH = Math.floor(totalMinutes / 60) % 24;
              const newM = Math.floor(totalMinutes % 60);
              newEtd = `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
         }
+    }
+
+    // 3. Auto-fill Commercial Time for Return Flight
+    let returnCommTime = '';
+    if (newRoute) {
+         // Lookup return route in DB
+         const cleanCode = newRoute.replace(/-/g, '');
+         let reverseCode = '';
+         if (cleanCode.length === 6) {
+             reverseCode = cleanCode.slice(3) + cleanCode.slice(0, 3);
+         }
+
+         const matchedRoute = routes.find(r => r.code === cleanCode) || 
+                              (reverseCode ? routes.find(r => r.code === reverseCode) : undefined);
+         
+         if (matchedRoute) {
+             const type = sourceFlight.aircraftType || '';
+             let decimalTime = 0;
+             if (matchedRoute.performances && matchedRoute.performances[type]) {
+                 decimalTime = matchedRoute.performances[type].commercialTime;
+             } else {
+                 decimalTime = matchedRoute.flightTime || 0;
+             }
+
+             if (decimalTime > 0) returnCommTime = decimalToHm(decimalTime);
+         }
     }
 
     const parentId = sourceFlight.parentId || sourceFlight.id;
@@ -232,7 +271,7 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
       status: 'Scheduled',
       date: currentDate,
       notes: `Return of ${sourceFlight.flightNumber}`,
-      commercialTime: ''
+      commercialTime: returnCommTime
     };
     
     setLocalFlights(prev => {
@@ -274,12 +313,50 @@ export const FlightPlanning: React.FC<FlightPlanningProps> = ({
     }));
   };
 
+  // --- AUTOMATED COMMERCIAL TIME LOGIC ---
   const handleRouteChange = (id: string, val: string) => {
     setHasUnsavedChanges(true);
     const code = val.toUpperCase();
+
     setLocalFlights(prev => prev.map(f => {
         if (f.id === id) {
-             return { ...f, route: code };
+             let newCommTime = f.commercialTime || '';
+             const type = f.aircraftType || '';
+
+             // Sanitize: Remove hyphens for lookup match against DB
+             const cleanCode = code.replace(/-/g, '');
+             
+             // Create reverse logic
+             let reverseCode = '';
+             if (code.includes('-')) {
+                 // If we have a hyphen, split and swap
+                 const parts = code.split('-');
+                 if (parts.length === 2) {
+                     reverseCode = (parts[1] + parts[0]).replace(/-/g, '');
+                 }
+             } else if (cleanCode.length === 6) {
+                 // If no hyphen, assume standard 3-letter IATA pair (e.g. OGLKAM -> KAMOGL)
+                 reverseCode = cleanCode.slice(3) + cleanCode.slice(0, 3);
+             }
+
+             // Attempt Lookup
+             const matchedRoute = routes.find(r => r.code === cleanCode) || 
+                                  (reverseCode ? routes.find(r => r.code === reverseCode) : undefined);
+
+             if (matchedRoute) {
+                 let decimalTime = 0;
+                 if (matchedRoute.performances && matchedRoute.performances[type]) {
+                     decimalTime = matchedRoute.performances[type].commercialTime;
+                 } else {
+                     decimalTime = matchedRoute.flightTime || 0; // Fallback
+                 }
+
+                 if (decimalTime > 0) {
+                     newCommTime = decimalToHm(decimalTime);
+                 }
+             }
+
+             return { ...f, route: code, commercialTime: newCommTime };
         }
         return f;
     }));
