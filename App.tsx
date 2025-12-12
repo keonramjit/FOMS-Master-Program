@@ -1,3 +1,4 @@
+
 import React, { Suspense } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { StatsCards } from './components/StatsCards';
@@ -26,6 +27,7 @@ const App: React.FC = () => {
   // --- THE FIX: USE CONTEXT INSTEAD OF LOCAL STATE ---
   const { 
     user, 
+    userProfile, // Added userProfile to destructuring
     authLoading, 
     logout, 
     isDemoMode, 
@@ -95,6 +97,7 @@ const App: React.FC = () => {
         onNavigate={setCurrentView} 
         onLogout={logout}
         userEmail={user?.email}
+        userRole={userProfile?.role} // Passed role to Sidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         features={features}
@@ -117,7 +120,7 @@ const App: React.FC = () => {
                 {currentView === 'access' ? (
                     <SubscriptionManagement 
                         features={features}
-                        userProfile={null} // You might want to expose userProfile from context if needed here
+                        userProfile={userProfile} 
                         onUpdateLicense={async (s) => await updateLicense(s)}
                     />
                 ) : currentView === 'crew' && features.enableCrewManagement ? (

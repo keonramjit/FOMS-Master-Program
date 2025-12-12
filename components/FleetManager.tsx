@@ -293,7 +293,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
 
   // 2. Default Dashboard
   return (
-    <div className="max-w-7xl mx-auto p-4 lg:p-8 pb-24 animate-in fade-in duration-300">
+    <div className="w-full p-4 lg:p-6 pb-24 animate-in fade-in duration-300">
       
       {/* Header */}
       <header className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

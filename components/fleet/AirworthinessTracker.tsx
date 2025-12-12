@@ -144,7 +144,7 @@ export const AirworthinessTracker: React.FC<AirworthinessTrackerProps> = ({ airc
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                <div className="max-w-6xl mx-auto space-y-8">
+                <div className="w-full space-y-8">
                     
                     {/* --- COMPONENT STATUS TAB --- */}
                     {activeTab === 'status' && (
@@ -308,7 +308,14 @@ export const AirworthinessTracker: React.FC<AirworthinessTrackerProps> = ({ airc
                                     {(aircraft.components || []).map(c => (
                                         <div key={c.id} className="flex justify-between items-center bg-white border border-slate-100 p-2 rounded-lg">
                                             <span className="text-sm font-bold text-slate-700">{c.name} ({c.type})</span>
-                                            <button onClick={() => handleDeleteComponent(c.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+                                            <button 
+                                                type="button"
+                                                onClick={() => handleDeleteComponent(c.id)} 
+                                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                title="Delete Component"
+                                            >
+                                                <Trash2 size={16}/>
+                                            </button>
                                         </div>
                                     ))}
                                 </div>
@@ -338,7 +345,14 @@ export const AirworthinessTracker: React.FC<AirworthinessTrackerProps> = ({ airc
                                     {(aircraft.maintenanceProgram || []).map(c => (
                                         <div key={c.id} className="flex justify-between items-center bg-white border border-slate-100 p-2 rounded-lg">
                                             <span className="text-sm font-bold text-slate-700">{c.name} @ {c.intervalHours}h</span>
-                                            <button onClick={() => handleDeleteCheck(c.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+                                            <button 
+                                                type="button"
+                                                onClick={() => handleDeleteCheck(c.id)} 
+                                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                title="Delete Check"
+                                            >
+                                                <Trash2 size={16}/>
+                                            </button>
                                         </div>
                                     ))}
                                 </div>
