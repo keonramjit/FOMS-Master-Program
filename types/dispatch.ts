@@ -20,6 +20,7 @@ export interface Passenger {
 
 export interface CargoItem {
     id: string;
+    origin?: string; // Added Origin
     consignor: string;
     consignee: string;
     destination: string; // Airport Code
