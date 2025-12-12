@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { 
   LayoutDashboard, 
@@ -15,10 +14,11 @@ import {
   GraduationCap,
   Settings
 } from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
 import { SystemSettings } from '../types';
 
 interface SidebarProps {
+  currentView: string;
+  onNavigate: (view: string) => void;
   onLogout: () => void;
   userEmail?: string | null;
   userRole?: string;
@@ -30,6 +30,8 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
+  currentView,
+  onNavigate,
   onLogout, 
   userEmail,
   userRole,
@@ -39,14 +41,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isDesktopOpen,
   onDesktopToggle
 }) => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  
   // Determine if we are in "mini" mode (desktop only and closed)
   const isCollapsed = !isDesktopOpen;
 
-  const handleNavigate = (path: string) => {
-    navigate(path);
+  const handleNavigate = (view: string) => {
+    onNavigate(view);
     onClose();
   };
 
@@ -108,8 +107,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <NavItem 
             icon={<LayoutDashboard size={20} />} 
             label="Dashboard" 
-            active={location.pathname === '/'} 
-            onClick={() => handleNavigate('/')}
+            active={currentView === 'dashboard'} 
+            onClick={() => handleNavigate('dashboard')}
             collapsed={isCollapsed}
           />
           
@@ -117,8 +116,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <NavItem 
                 icon={<Calendar size={20} />} 
                 label="Planning" 
-                active={location.pathname === '/planning'} 
-                onClick={() => handleNavigate('/planning')}
+                active={currentView === 'planning'} 
+                onClick={() => handleNavigate('planning')}
                 collapsed={isCollapsed}
             />
           )}
@@ -127,8 +126,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <NavItem 
                 icon={<ClipboardList size={20} />} 
                 label="Dispatch" 
-                active={location.pathname === '/dispatch'} 
-                onClick={() => handleNavigate('/dispatch')}
+                active={currentView === 'dispatch'} 
+                onClick={() => handleNavigate('dispatch')}
                 collapsed={isCollapsed}
             />
           )}
@@ -137,8 +136,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <NavItem 
                 icon={<BookOpen size={20} />} 
                 label="Voyage Report" 
-                active={location.pathname === '/voyage'} 
-                onClick={() => handleNavigate('/voyage')}
+                active={currentView === 'voyage'} 
+                onClick={() => handleNavigate('voyage')}
                 collapsed={isCollapsed}
             />
           )}
@@ -147,8 +146,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <NavItem 
                 icon={<Users size={20} />} 
                 label="Crew" 
-                active={location.pathname === '/crew'} 
-                onClick={() => handleNavigate('/crew')}
+                active={currentView === 'crew'} 
+                onClick={() => handleNavigate('crew')}
                 collapsed={isCollapsed}
             />
           )}
@@ -157,8 +156,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <NavItem 
                 icon={<GraduationCap size={20} />} 
                 label="Training" 
-                active={location.pathname === '/training'} 
-                onClick={() => handleNavigate('/training')}
+                active={currentView === 'training'} 
+                onClick={() => handleNavigate('training')}
                 collapsed={isCollapsed}
             />
           )}
@@ -167,8 +166,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <NavItem 
                 icon={<Plane size={20} />} 
                 label="Fleet" 
-                active={location.pathname === '/fleet'} 
-                onClick={() => handleNavigate('/fleet')}
+                active={currentView === 'fleet'} 
+                onClick={() => handleNavigate('fleet')}
                 collapsed={isCollapsed}
             />
           )}
@@ -178,16 +177,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <NavItem 
                 icon={<Settings size={20} />} 
                 label="Settings" 
-                active={location.pathname === '/settings'} 
-                onClick={() => handleNavigate('/settings')}
+                active={currentView === 'routes' || currentView === 'customers'} 
+                onClick={() => handleNavigate('routes')}
                 collapsed={isCollapsed}
             />
             
             <NavItem 
                 icon={<Shield size={20} />} 
                 label="Admin" 
-                active={location.pathname === '/admin'} 
-                onClick={() => handleNavigate('/admin')}
+                active={currentView === 'access'} 
+                onClick={() => handleNavigate('access')}
                 collapsed={isCollapsed}
             />
           </div>
