@@ -88,3 +88,18 @@ export const hmToDecimal = (str: string | undefined): number => {
     // Fallback to direct float parsing (legacy support for 1.5)
     return parseFloat(str) || 0;
 };
+
+/**
+ * Maintenance Status Calculator
+ */
+export const calculateMaintenanceStatus = (currentHours: number, interval: number, lastPerformed: number) => {
+    const nextDue = lastPerformed + interval;
+    const remaining = nextDue - currentHours;
+    const percentageUsed = Math.min(100, Math.max(0, ((currentHours - lastPerformed) / interval) * 100));
+    
+    let status: 'Good' | 'Warning' | 'Critical' = 'Good';
+    if (remaining <= 0) status = 'Critical';
+    else if (remaining < 50) status = 'Warning';
+
+    return { nextDue, remaining, percentageUsed, status };
+};

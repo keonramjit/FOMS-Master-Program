@@ -1,12 +1,13 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Aircraft, Flight, SystemSettings, AircraftType } from '../types';
-import { Plane, Plus, Edit2, Search, X, Save, AlertTriangle, Wrench, CheckCircle2, Activity, AlertOctagon, History, Timer, Lock, Loader2, Gauge, Filter, BookOpen, RotateCcw, ArrowRight, User, Clock, ClipboardList } from 'lucide-react';
+import { Plane, Plus, Edit2, Search, X, Save, AlertTriangle, Wrench, CheckCircle2, Activity, AlertOctagon, History, Timer, Lock, Loader2, Gauge, Filter, BookOpen, RotateCcw, ArrowRight, User, Clock, ClipboardList, FileText } from 'lucide-react';
 import { FLEET_INVENTORY } from '../constants';
 import { FeatureGate } from './FeatureGate';
 import { fetchAircraftHistory, updateFlight } from '../services/firebase';
 import { CalendarWidget } from './CalendarWidget';
 import { calculateDuration } from '../utils/calculations';
+import { AirworthinessTracker } from './fleet/AirworthinessTracker'; // Imported New Component
 
 interface FleetManagerProps {
   fleet: (Aircraft & { _docId?: string })[];
@@ -27,20 +28,26 @@ interface FlightEditState {
 }
 
 export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, aircraftTypes, onAdd, onUpdate, features }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'checks' | 'airworthiness'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'checks' | 'daily-logs'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('All');
   
+  // Navigation State - Store ID only to ensure reactivity
+  const [viewingAircraftId, setViewingAircraftId] = useState<string | null>(null);
+
+  // Derive the active aircraft object from the live fleet prop
+  const viewingAircraft = useMemo(() => 
+    fleet.find(a => a._docId === viewingAircraftId) || null,
+  [fleet, viewingAircraftId]);
+
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAircraft, setEditingAircraft] = useState<(Aircraft & { _docId?: string }) | null>(null);
   
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [historyAircraft, setHistoryAircraft] = useState<(Aircraft & { _docId?: string }) | null>(null);
+  // Legacy History State (kept for direct access if needed, but mainly replaced by Tracker)
   const [historyData, setHistoryData] = useState<Flight[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   
-  // Airworthiness Tab State
+  // Daily Logs Tab State
   const [airworthinessDate, setAirworthinessDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [selectedAirworthinessReg, setSelectedAirworthinessReg] = useState<string>('');
   const [logEdits, setLogEdits] = useState<Record<string, FlightEditState>>({});
@@ -63,7 +70,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
     return matchesSearch && matchesType;
   });
 
-  // --- Airworthiness Logic ---
+  // --- Daily Logs Logic ---
   
   // Filter fleet to only show aircraft active on the selected date
   const activeLogFleet = useMemo(() => {
@@ -209,20 +216,10 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
     setIsModalOpen(true);
   };
 
-  const handleOpenHistory = async (aircraft: (Aircraft & { _docId?: string })) => {
-    setHistoryAircraft(aircraft);
-    setIsHistoryOpen(true);
-    setHistoryData([]); // Clear previous
-    setIsLoadingHistory(true);
-    
-    try {
-        const history = await fetchAircraftHistory(aircraft.registration);
-        setHistoryData(history);
-    } catch (e) {
-        console.error("Failed to load history", e);
-    } finally {
-        setIsLoadingHistory(false);
-    }
+  const handleSelectAircraft = (aircraft: (Aircraft & { _docId?: string })) => {
+      if (aircraft._docId) {
+          setViewingAircraftId(aircraft._docId);
+      }
   };
 
   const handleSave = () => {
@@ -259,35 +256,6 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
     }
   };
 
-  // Logic for Fleet Checks
-  const getNextCheckDetails = (aircraft: Aircraft) => {
-    const nextDue = aircraft.nextCheckHours || 0;
-    const cyclePos = nextDue % 600;
-    
-    let checkType = 'A';
-    let checkColor = 'bg-slate-100 text-slate-700 border-slate-200';
-
-    if (cyclePos === 0) {
-        checkType = 'D';
-        checkColor = 'bg-purple-100 text-purple-700 border-purple-200';
-    } else if (cyclePos === 200) {
-        checkType = 'B';
-        checkColor = 'bg-blue-100 text-blue-700 border-blue-200';
-    } else if (cyclePos === 400) {
-        checkType = 'C';
-        checkColor = 'bg-orange-100 text-orange-700 border-orange-200';
-    } else {
-        // 100, 300, 500
-        checkType = 'A';
-        checkColor = 'bg-emerald-100 text-emerald-700 border-emerald-200';
-    }
-
-    const remaining = nextDue - (aircraft.currentHours || 0);
-    const progress = Math.max(0, Math.min(100, (1 - (remaining / 100)) * 100)); // Assuming 100h interval for visual bar
-
-    return { checkType, checkColor, remaining, progress };
-  };
-
   // Stats for Overview
   const totalAircraft = fleet.length;
   const activeAircraft = fleet.filter(f => f.status === 'Active').length;
@@ -308,6 +276,22 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
   const superHeaderClass = "px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center border-l border-slate-200 first:border-l-0 bg-slate-50/80";
   const subHeaderClass = "px-2 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide text-center border-t border-slate-200";
 
+  // --- RENDER ---
+
+  // 1. If Viewing Detail
+  if (viewingAircraft) {
+      return (
+          <div className="h-full">
+              <AirworthinessTracker 
+                  aircraft={viewingAircraft} 
+                  onUpdate={onUpdate}
+                  onBack={() => setViewingAircraftId(null)}
+              />
+          </div>
+      );
+  }
+
+  // 2. Default Dashboard
   return (
     <div className="max-w-7xl mx-auto p-4 lg:p-8 pb-24 animate-in fade-in duration-300">
       
@@ -346,22 +330,12 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
             Fleet Overview
         </button>
         <button 
-            onClick={() => setActiveTab('checks')}
-            className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-all ${activeTab === 'checks' ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-100' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
-        >
-            <div className="flex items-center gap-2">
-                <Gauge size={18} />
-                Fleet Checks
-                {!features.enableFleetChecks && <Lock size={12} className="opacity-50" />}
-            </div>
-        </button>
-        <button 
-            onClick={() => setActiveTab('airworthiness')}
-            className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-all ${activeTab === 'airworthiness' ? 'bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-100' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+            onClick={() => setActiveTab('daily-logs')}
+            className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-all ${activeTab === 'daily-logs' ? 'bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-100' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
         >
             <div className="flex items-center gap-2">
                 <ClipboardList size={18} />
-                Airworthiness
+                Voyage Logs
             </div>
         </button>
       </div>
@@ -450,9 +424,26 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                                 {aircrafts.map(ac => {
-                                    const remaining = (ac.nextCheckHours || 0) - (ac.currentHours || 0);
-                                    const progress = Math.min(100, ((ac.currentHours || 0) / (ac.nextCheckHours || 1)) * 100);
+                                    // Logic for visual bar (Fall back to legacy or use Airframe total)
+                                    const nextCheck = ac.nextCheckHours || 0;
+                                    const current = ac.airframeTotalTime || ac.currentHours || 0;
+                                    
+                                    // Use first upcoming maintenance rule if available, else legacy
+                                    const upcomingRule = (ac.maintenanceProgram || []).sort((a,b) => {
+                                        const lastA = (ac.maintenanceStatus || {})[a.id]?.lastPerformedHours || 0;
+                                        const lastB = (ac.maintenanceStatus || {})[b.id]?.lastPerformedHours || 0;
+                                        const dueA = lastA + a.intervalHours;
+                                        const dueB = lastB + b.intervalHours;
+                                        return dueA - dueB;
+                                    })[0];
+
+                                    const targetHours = upcomingRule ? ((ac.maintenanceStatus || {})[upcomingRule.id]?.lastPerformedHours || 0) + upcomingRule.intervalHours : nextCheck;
+                                    const remaining = targetHours - current;
+                                    
                                     const isNearCheck = remaining < 50;
+                                    
+                                    // Simple visual progress (last 100 hrs)
+                                    const progress = Math.max(0, Math.min(100, (1 - (remaining / 100)) * 100));
 
                                     return (
                                         <div 
@@ -464,7 +455,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
                                                 cursor-pointer overflow-hidden
                                                 ${theme.lightBorder} hover:border-${theme.accent}-300
                                             `}
-                                            onClick={() => handleOpenHistory(ac)}
+                                            onClick={() => handleSelectAircraft(ac)}
                                         >
                                             {/* Decorative Background Icon */}
                                             <Plane 
@@ -498,12 +489,12 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
                                                 <div className="flex justify-between items-end mb-2">
                                                     <div className="flex flex-col">
                                                         <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1"><Gauge size={10}/> Hours</span>
-                                                        <span className="text-sm font-bold text-slate-700 font-mono">{ac.currentHours?.toLocaleString()}</span>
+                                                        <span className="text-sm font-bold text-slate-700 font-mono">{current.toLocaleString()}</span>
                                                     </div>
                                                     <div className="flex flex-col items-end">
-                                                        <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1"><Timer size={10}/> Next Check</span>
+                                                        <span className="text-[10px] text-slate-400 font-bold uppercase flex items-center gap-1"><Timer size={10}/> Next Due</span>
                                                         <span className={`text-sm font-bold font-mono ${isNearCheck ? 'text-amber-600' : 'text-slate-700'}`}>
-                                                            {ac.nextCheckHours?.toLocaleString()}
+                                                            {targetHours.toLocaleString()}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -520,6 +511,14 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
                                                         Check due in {remaining} hrs
                                                     </div>
                                                 )}
+                                                
+                                                {/* Explicit Action Button */}
+                                                <button 
+                                                    className="w-full mt-4 py-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-700 font-bold text-xs rounded-lg border border-slate-200 hover:border-blue-200 transition-colors flex items-center justify-center gap-2"
+                                                    onClick={(e) => { e.stopPropagation(); handleSelectAircraft(ac); }}
+                                                >
+                                                    <FileText size={14} /> View Technical Records
+                                                </button>
                                             </div>
 
                                             {/* Action Buttons - Hover Reveal */}
@@ -550,84 +549,8 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
         </div>
       )}
 
-      {/* CHECKS TAB */}
-      {activeTab === 'checks' && (
-        <FeatureGate isEnabled={features.enableFleetChecks}>
-            <div className="animate-in slide-in-from-bottom-2 duration-300 space-y-8">
-                
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                        <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                            <Wrench className="text-emerald-600" size={20} />
-                            Fleet Maintenance Status
-                        </h3>
-                        <span className="text-xs text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full font-medium">
-                            Standard Cycle: A(100) → B(200) → A(300) → C(400) → A(500) → D(600)
-                        </span>
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse min-w-[800px]">
-                            <thead>
-                                <tr className="bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                                    <th className="px-6 py-4">Aircraft</th>
-                                    <th className="px-6 py-4">Current Hours</th>
-                                    <th className="px-6 py-4">Next Check</th>
-                                    <th className="px-6 py-4">Hours Due</th>
-                                    <th className="px-6 py-4">Remaining</th>
-                                    <th className="px-6 py-4 w-1/4">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {fleet.map(ac => {
-                                    const check = getNextCheckDetails(ac);
-                                    const isCritical = check.remaining < 25;
-                                    return (
-                                        <tr key={ac.registration} className="hover:bg-slate-50/50">
-                                            <td className="px-6 py-4">
-                                                <div className="font-bold text-slate-900">{ac.registration}</div>
-                                                <div className="text-xs text-slate-500 font-mono">{ac.type}</div>
-                                            </td>
-                                            <td className="px-6 py-4 font-mono text-slate-700">
-                                                {ac.currentHours?.toLocaleString()}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className={`px-2 py-1 rounded text-xs font-bold border uppercase ${check.checkColor}`}>
-                                                    Check {check.checkType}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 font-mono text-slate-700">
-                                                {ac.nextCheckHours?.toLocaleString()}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className={`font-bold font-mono ${isCritical ? 'text-red-600' : 'text-slate-700'}`}>
-                                                    {check.remaining} hrs
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-1">
-                                                    <div 
-                                                        className={`h-full rounded-full ${isCritical ? 'bg-red-500' : 'bg-blue-500'}`} 
-                                                        style={{ width: `${check.progress}%` }}
-                                                    />
-                                                </div>
-                                                <div className="text-[10px] text-slate-400 text-right">
-                                                    {Math.round(check.progress)}% to check
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-            </div>
-        </FeatureGate>
-      )}
-
-      {/* AIRWORTHINESS TAB */}
-      {activeTab === 'airworthiness' && (
+      {/* DAILY LOGS TAB (Tech Log) */}
+      {activeTab === 'daily-logs' && (
         <div className="flex h-[calc(100vh-200px)] bg-slate-50 relative overflow-hidden flex-col md:flex-row rounded-xl border border-slate-200 shadow-sm animate-in slide-in-from-bottom-2 duration-300">
             {/* Sidebar Selection */}
             <div className="w-full md:w-72 bg-white border-r border-slate-200 p-0 flex flex-col shadow-sm z-10 shrink-0">
@@ -1011,79 +934,6 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
                     </button>
                 </div>
             </div>
-        </div>
-      )}
-
-      {/* History Modal */}
-      {isHistoryOpen && historyAircraft && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <div>
-                <h2 className="font-bold text-lg text-slate-900 flex items-center gap-2">
-                  <History className="text-blue-600" size={20} />
-                  Flight History
-                </h2>
-                <div className="text-sm text-slate-500 mt-1 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{historyAircraft.registration}</span>
-                  <span>•</span>
-                  <span>Last 50 Flights Logged: <strong>{recordedHours.toFixed(1)} hrs</strong></span>
-                </div>
-              </div>
-              <button onClick={() => setIsHistoryOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-auto p-0 min-h-[300px]">
-               {isLoadingHistory ? (
-                   <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
-                       <Loader2 size={32} className="animate-spin text-blue-500" />
-                       <p className="text-sm font-medium">Fetching records...</p>
-                   </div>
-               ) : (
-                   <table className="w-full text-left text-sm border-collapse">
-                     <thead className="bg-slate-50 sticky top-0 z-10 text-slate-500 uppercase text-xs font-semibold">
-                       <tr>
-                         <th className="px-6 py-3 border-b border-slate-200">Date</th>
-                         <th className="px-6 py-3 border-b border-slate-200">Flight #</th>
-                         <th className="px-6 py-3 border-b border-slate-200">Route</th>
-                         <th className="px-6 py-3 border-b border-slate-200">Crew</th>
-                         <th className="px-6 py-3 border-b border-slate-200 text-right">Duration</th>
-                       </tr>
-                     </thead>
-                     <tbody className="divide-y divide-slate-100">
-                       {historyData.length === 0 ? (
-                         <tr>
-                           <td colSpan={5} className="px-6 py-8 text-center text-slate-400">No recorded flights for this aircraft.</td>
-                         </tr>
-                       ) : (
-                         historyData.map(flight => (
-                           <tr key={flight.id} className="hover:bg-slate-50">
-                             <td className="px-6 py-3 text-slate-600 font-medium whitespace-nowrap">{flight.date}</td>
-                             <td className="px-6 py-3 font-bold text-slate-900">{flight.flightNumber}</td>
-                             <td className="px-6 py-3 font-mono text-xs">{flight.route}</td>
-                             <td className="px-6 py-3">
-                               <div className="flex gap-1">
-                                  <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-xs font-bold">{flight.pic}</span>
-                                  {flight.sic && <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-xs">{flight.sic}</span>}
-                               </div>
-                             </td>
-                             <td className="px-6 py-3 text-right font-mono font-medium text-slate-700">
-                               {flight.flightTime ? `${flight.flightTime}h` : '-'}
-                             </td>
-                           </tr>
-                         ))
-                       )}
-                     </tbody>
-                   </table>
-               )}
-            </div>
-            
-            <div className="p-4 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 text-center">
-              Only completed and recorded flights in the system are shown.
-            </div>
-          </div>
         </div>
       )}
 

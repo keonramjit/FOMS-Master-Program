@@ -1,14 +1,45 @@
 
+export interface AircraftComponent {
+  id: string;
+  name: string; // e.g. "Port Engine", "Nose Gear"
+  type: 'Engine' | 'Propeller' | 'Landing Gear' | 'Airframe' | 'Component';
+  serialNumber: string;
+  currentHours: number;
+  totalCycles?: number;
+}
+
+export interface MaintenanceCheck {
+  id: string;
+  name: string; // e.g. "A-Check", "100hr Inspection"
+  intervalHours: number;
+  toleranceHours?: number;
+}
+
+export interface MaintenanceStatus {
+  lastPerformedHours: number;
+  lastPerformedDate: string;
+}
+
 export interface Aircraft {
   registration: string;
   type: string; // Dynamic string instead of hardcoded union
   status: 'Active' | 'Maintenance' | 'AOG';
-  currentHours?: number;
-  nextCheckHours?: number;
+  
+  // Weights
   maxTakeoffWeight?: number; // lbs
-  maxLandingWeight?: number; // lbs (NEW)
-  maxZeroFuelWeight?: number; // lbs (NEW)
+  maxLandingWeight?: number; // lbs
+  maxZeroFuelWeight?: number; // lbs
   basicEmptyWeight?: number; // lbs
+
+  // Technical Records
+  airframeTotalTime?: number; // Master counter
+  components?: AircraftComponent[];
+  maintenanceProgram?: MaintenanceCheck[];
+  maintenanceStatus?: Record<string, MaintenanceStatus>; // Keyed by MaintenanceCheck.id
+
+  // Legacy fields (kept for backward compatibility during migration)
+  currentHours?: number; 
+  nextCheckHours?: number;
 }
 
 export interface OperationsStats {

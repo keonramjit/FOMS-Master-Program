@@ -1,0 +1,113 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helper Functions ---
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Fetch the user's profile document based on their Auth email
+    // Note: This assumes document IDs in 'users' collection match the email address
+    function getUserProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.token.email)).data;
+    }
+
+    function hasRole(roles) {
+      return isAuthenticated() && (getUserProfile().role in roles);
+    }
+
+    // Role Groups
+    // 'super_admin' has god mode.
+    // 'admin' can manage most settings.
+    // 'dispatcher' can manage flights, crew, and fleet operations.
+    // 'pilot' can read data and file voyage reports.
+
+    function isOpStaff() {
+      return hasRole(['super_admin', 'admin', 'dispatcher']);
+    }
+
+    function isAdmin() {
+      return hasRole(['super_admin', 'admin']);
+    }
+
+    // --- Collection Rules ---
+
+    // Users: Users can read all profiles (for crew lists), but only write their own (or be written by admin)
+    match /users/{email} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && (request.auth.token.email == email || isAdmin());
+      allow delete: if hasRole(['super_admin']);
+    }
+
+    // Organizations: Read-only for most, write for super_admin
+    match /organizations/{orgId} {
+      allow read: if isAuthenticated();
+      allow write: if hasRole(['super_admin']);
+    }
+
+    // Fleet: (The new Airworthiness Module)
+    // All auth users can view fleet status.
+    // Only Ops Staff can update hours, components, and maintenance logs.
+    match /fleet/{aircraftId} {
+      allow read: if isAuthenticated();
+      allow write: if isOpStaff();
+    }
+
+    // Aircraft Types
+    match /aircraft_types/{typeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Flights: Core operations
+    match /flights/{flightId} {
+      allow read: if isAuthenticated();
+      // Pilots can update flights assigned to them (e.g. Voyage Reports)
+      allow update: if isOpStaff() || (isAuthenticated() && (resource.data.pic == getUserProfile().code || resource.data.sic == getUserProfile().code));
+      allow create, delete: if isOpStaff();
+    }
+
+    // Crew Roster
+    match /crew/{crewId} {
+      allow read: if isAuthenticated();
+      allow write: if isOpStaff();
+    }
+
+    // Training Records
+    match /training_records/{recordId} {
+      allow read: if isAuthenticated();
+      allow write: if isOpStaff();
+    }
+
+    match /training_events/{eventId} {
+      allow read: if isAuthenticated();
+      allow write: if isOpStaff();
+    }
+
+    // Dispatch Records
+    match /dispatch/{flightId} {
+      allow read: if isAuthenticated();
+      allow write: if isOpStaff();
+    }
+
+    // Routes & Locations
+    match /routes/{routeId} {
+      allow read: if isAuthenticated();
+      allow write: if isOpStaff();
+    }
+    
+    match /locations/{locId} {
+      allow read: if isAuthenticated();
+      allow write: if isOpStaff();
+    }
+
+    // Customers
+    match /customers/{custId} {
+      allow read: if isAuthenticated();
+      allow write: if isOpStaff();
+    }
+  }
+}
