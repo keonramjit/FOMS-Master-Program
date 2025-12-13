@@ -4,7 +4,7 @@ import { Aircraft, AircraftComponent, MaintenanceCheck } from '../../types';
 import { calculateMaintenanceStatus } from '../../utils/calculations';
 import { 
     Gauge, Activity, ClipboardList, Settings, Plus, Save, Trash2, 
-    CheckCircle2, AlertTriangle, AlertOctagon, RotateCcw, PenTool 
+    CheckCircle2, AlertTriangle, AlertOctagon, RotateCcw, PenTool, Info, Plane 
 } from 'lucide-react';
 
 interface AirworthinessTrackerProps {
@@ -14,7 +14,7 @@ interface AirworthinessTrackerProps {
 }
 
 export const AirworthinessTracker: React.FC<AirworthinessTrackerProps> = ({ aircraft, onUpdate, onBack }) => {
-    const [activeTab, setActiveTab] = useState<'status' | 'maintenance' | 'config'>('status');
+    const [activeTab, setActiveTab] = useState<'details' | 'status' | 'maintenance' | 'config'>('details');
     const [isUpdating, setIsUpdating] = useState(false);
 
     // Component Form State
@@ -25,6 +25,10 @@ export const AirworthinessTracker: React.FC<AirworthinessTrackerProps> = ({ airc
     const totalHours = aircraft.airframeTotalTime || aircraft.currentHours || 0;
 
     // --- Handlers ---
+
+    const handleUpdateDetails = (field: keyof Aircraft, value: any) => {
+        onUpdate(aircraft._docId!, { [field]: value });
+    };
 
     const handleUpdateComponent = (compId: string, hours: number) => {
         const updatedComponents = (aircraft.components || []).map(c => 
@@ -137,6 +141,7 @@ export const AirworthinessTracker: React.FC<AirworthinessTrackerProps> = ({ airc
 
             {/* Navigation */}
             <div className="bg-white border-b border-slate-200 px-6 flex gap-6">
+                <TabButton active={activeTab === 'details'} onClick={() => setActiveTab('details')} icon={<Info size={18}/>} label="Aircraft Details" />
                 <TabButton active={activeTab === 'status'} onClick={() => setActiveTab('status')} icon={<Gauge size={18}/>} label="Component Status" />
                 <TabButton active={activeTab === 'maintenance'} onClick={() => setActiveTab('maintenance')} icon={<Activity size={18}/>} label="Maintenance Program" />
                 <TabButton active={activeTab === 'config'} onClick={() => setActiveTab('config')} icon={<Settings size={18}/>} label="Configuration" />
@@ -145,6 +150,77 @@ export const AirworthinessTracker: React.FC<AirworthinessTrackerProps> = ({ airc
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
                 <div className="w-full space-y-8">
+                    
+                    {/* --- DETAILS TAB --- */}
+                    {activeTab === 'details' && (
+                        <div className="max-w-4xl mx-auto animate-in slide-in-from-bottom-2 space-y-6">
+                            
+                            {/* General Info Card */}
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <Plane size={18} className="text-blue-600"/> General Information
+                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Registration</label>
+                                        <input 
+                                            type="text" 
+                                            className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900" 
+                                            value={aircraft.registration}
+                                            disabled
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Aircraft Type</label>
+                                        <input 
+                                            type="text" 
+                                            className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-900" 
+                                            value={aircraft.type}
+                                            disabled
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Operational Status</label>
+                                        <select 
+                                            className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none"
+                                            value={aircraft.status}
+                                            onChange={(e) => handleUpdateDetails('status', e.target.value)}
+                                        >
+                                            <option value="Active">Active</option>
+                                            <option value="Maintenance">Maintenance</option>
+                                            <option value="AOG">AOG</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Current Airframe Hours</label>
+                                        <div className="relative">
+                                            <input 
+                                                type="number" 
+                                                className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none" 
+                                                value={aircraft.airframeTotalTime || aircraft.currentHours || 0}
+                                                onChange={(e) => handleUpdateDetails('airframeTotalTime', Number(e.target.value))}
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">HRS</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Weight Configuration */}
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                    <Activity size={18} className="text-emerald-600"/> Weight Configuration (LBS)
+                                </h3>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <WeightInput label="Max Takeoff (MTOW)" value={aircraft.maxTakeoffWeight} onChange={(v) => handleUpdateDetails('maxTakeoffWeight', v)} />
+                                    <WeightInput label="Max Landing (MLW)" value={aircraft.maxLandingWeight} onChange={(v) => handleUpdateDetails('maxLandingWeight', v)} />
+                                    <WeightInput label="Max Zero Fuel (MZFW)" value={aircraft.maxZeroFuelWeight} onChange={(v) => handleUpdateDetails('maxZeroFuelWeight', v)} />
+                                    <WeightInput label="Basic Empty (BEW)" value={aircraft.basicEmptyWeight} onChange={(v) => handleUpdateDetails('basicEmptyWeight', v)} />
+                                </div>
+                            </div>
+
+                        </div>
+                    )}
                     
                     {/* --- COMPONENT STATUS TAB --- */}
                     {activeTab === 'status' && (
@@ -374,4 +450,17 @@ const TabButton: React.FC<{ active: boolean; onClick: () => void; icon: React.Re
     >
         {icon} {label}
     </button>
+);
+
+const WeightInput: React.FC<{ label: string; value?: number; onChange: (val: number) => void }> = ({ label, value, onChange }) => (
+    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">{label}</label>
+        <input 
+            type="number" 
+            className="w-full bg-transparent font-bold text-slate-800 outline-none"
+            placeholder="0"
+            value={value || ''}
+            onChange={(e) => onChange(Number(e.target.value))}
+        />
+    </div>
 );

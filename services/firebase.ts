@@ -1,12 +1,5 @@
-
 import { initializeApp } from "firebase/app";
-import { 
-  getAuth, 
-  signInWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged,
-  User as FirebaseUser
-} from "firebase/auth";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { 
   getFirestore, 
   collection, 
@@ -25,9 +18,12 @@ import {
   writeBatch,
   initializeFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager
+  persistentMultipleTabManager,
+  increment,
+  serverTimestamp
 } from "firebase/firestore";
 import { Flight, CrewMember, Aircraft, RouteDefinition, CustomerDefinition, SystemSettings, DispatchRecord, TrainingRecord, TrainingEvent, Organization, License, UserProfile, LocationDefinition, AircraftType } from "../types";
+import { TechLogEntry, TechLogTimeData, TechLogMaintenanceData } from "../types/techlog";
 
 const firebaseConfig = {
   apiKey: "AIzaSyC3fhxJINKe8oiizZqxbuT8wb8eTNxofDY",
@@ -688,4 +684,114 @@ export const deleteTrainingEvent = async (id: string) => {
     console.error("Error deleting training event", e);
     throw e;
   }
+};
+
+// --- TECH LOG & MAINTENANCE SERVICES ---
+
+export const subscribeToTechLogs = (callback: (logs: TechLogEntry[]) => void) => {
+    // Increased limit to 300 to cover approx 3-5 days of full operations history
+    const q = query(collection(db, "tech_logs"), orderBy("date", "desc"), limit(300));
+    return onSnapshot(q, (snapshot) => {
+        const logs = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as TechLogEntry[];
+        callback(logs);
+    }, (error) => console.error("Tech Log Snapshot Error", error));
+};
+
+export const updateTechLog = async (id: string, updates: Partial<TechLogEntry>) => {
+    try {
+        const docRef = doc(db, "tech_logs", id);
+        await updateDoc(docRef, sanitizeData(updates));
+    } catch (e) {
+        console.error("Error updating tech log:", e);
+        throw e;
+    }
+};
+
+// Triggered when Voyage Report is saved
+export const syncVoyageToTechLog = async (flight: Flight) => {
+    if (!flight.id) return;
+    
+    // Check if Tech Log already exists for this flight
+    const q = query(collection(db, "tech_logs"), where("flightId", "==", flight.id));
+    const snap = await getDocs(q);
+    
+    if (!snap.empty) {
+        // Update existing if it is still a draft (don't overwrite verified logs)
+        const logDoc = snap.docs[0];
+        const logData = logDoc.data() as TechLogEntry;
+        if (logData.status === 'Draft') {
+            await updateDoc(logDoc.ref, {
+               "times.out": flight.outTime || '',
+               "times.off": flight.offTime || '',
+               "times.on": flight.onTime || '',
+               "times.in": flight.inTime || '',
+               "times.flightTime": flight.actualFlightTime || 0,
+               "times.blockTime": flight.actualBlockTime || 0
+            });
+        }
+        return;
+    }
+
+    // Create New Draft
+    const newLog: Omit<TechLogEntry, 'id'> = {
+        flightId: flight.id,
+        flightNumber: flight.flightNumber,
+        aircraftRegistration: flight.aircraftRegistration,
+        date: flight.date,
+        status: 'Draft',
+        times: {
+            out: flight.outTime || '',
+            off: flight.offTime || '',
+            on: flight.onTime || '',
+            in: flight.inTime || '',
+            flightTime: flight.actualFlightTime || 0,
+            blockTime: flight.actualBlockTime || 0
+        },
+        maintenance: {
+            fuelUplift: 0,
+            oilUplift: 0,
+            defects: [],
+            actionTaken: []
+        }
+    };
+    
+    await addDoc(collection(db, "tech_logs"), sanitizeData(newLog));
+};
+
+export const commitTechLog = async (log: TechLogEntry, aircraft: Aircraft & { _docId?: string }) => {
+    if (!aircraft._docId) throw new Error("Invalid Aircraft ID");
+    
+    const batch = writeBatch(db);
+    
+    // 1. Lock Tech Log
+    const logRef = doc(db, "tech_logs", log.id);
+    batch.update(logRef, { 
+        status: 'Verified',
+        verifiedAt: new Date().toISOString(),
+        verifiedBy: auth.currentUser?.email || 'System'
+    });
+
+    // 2. Update Aircraft Totals
+    const aircraftRef = doc(db, "fleet", aircraft._docId);
+    
+    // Calculate new total time
+    const flightHours = log.times.flightTime || 0;
+    
+    // Prepare component updates
+    const updatedComponents = (aircraft.components || []).map(comp => {
+        // Logic: All installed components accrue flight time
+        // In a real app, you might filter by 'installed' status or type
+        return {
+            ...comp,
+            currentHours: (comp.currentHours || 0) + flightHours
+        };
+    });
+
+    batch.update(aircraftRef, {
+        airframeTotalTime: increment(flightHours),
+        currentHours: increment(flightHours), // Legacy sync
+        components: updatedComponents
+    });
+
+    await batch.commit();
 };

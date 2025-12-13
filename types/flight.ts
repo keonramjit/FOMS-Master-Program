@@ -55,6 +55,14 @@ export interface LocationDefinition {
   code: string; // e.g. KAI
 }
 
+export interface CustomerDefinition {
+  id: string;
+  name: string;
+  customerId?: string; // e.g. Billing ID
+  email?: string;
+  phone?: string;
+}
+
 export interface VoyageEntry {
     id: string;
     flightId?: string; // Link to actual flight if exists

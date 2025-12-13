@@ -4,7 +4,7 @@ import { Flight, CrewMember, Aircraft, SystemSettings } from '../types';
 import { BookOpen, Calendar, Save, Plane, CheckCircle2, RotateCcw, ArrowRight, Clock, User, AlertCircle } from 'lucide-react';
 import { FeatureGate } from './FeatureGate';
 import { CalendarWidget } from './CalendarWidget';
-import { updateFlight } from '../services/firebase';
+import { updateFlight, syncVoyageToTechLog } from '../services/firebase';
 import { calculateDuration } from '../utils/calculations';
 
 interface VoyageReportManagerProps {
@@ -102,7 +102,7 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
   const handleSave = async () => {
       setIsSaving(true);
       try {
-          const promises = aircraftFlights.map(f => {
+          const promises = aircraftFlights.map(async f => {
               const edit = edits[f.id];
               if (!edit) return Promise.resolve();
 
@@ -110,8 +110,8 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
               const actualFlightTime = calculateDuration(edit.offTime, edit.onTime);
               const actualBlockTime = calculateDuration(edit.outTime, edit.inTime);
 
-              // Update fields
-              return updateFlight(f.id, {
+              // 1. Update Flight
+              await updateFlight(f.id, {
                   outTime: edit.outTime,
                   offTime: edit.offTime,
                   onTime: edit.onTime,
@@ -121,6 +121,21 @@ export const VoyageReportManager: React.FC<VoyageReportManagerProps> = ({ flight
                   actualBlockTime: actualBlockTime > 0 ? actualBlockTime : undefined,
                   status: (edit.inTime && edit.onTime) ? 'Completed' : f.status
               });
+
+              // 2. Trigger Tech Log Sync (Background)
+              if (edit.inTime && edit.onTime) {
+                  // Re-construct latest object for sync
+                  const latestFlightData = {
+                      ...f,
+                      outTime: edit.outTime,
+                      offTime: edit.offTime,
+                      onTime: edit.onTime,
+                      inTime: edit.inTime,
+                      actualFlightTime,
+                      actualBlockTime
+                  };
+                  await syncVoyageToTechLog(latestFlightData);
+              }
           });
 
           await Promise.all(promises);

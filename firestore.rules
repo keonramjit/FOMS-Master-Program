@@ -93,6 +93,15 @@ service cloud.firestore {
       allow write: if isOpStaff();
     }
 
+    // Tech Logs (New Module)
+    match /tech_logs/{logId} {
+      allow read: if isAuthenticated();
+      // Pilots need to create/update drafts via Voyage Report Sync
+      // Ops Staff need to verify/commit
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+    }
+
     // Routes & Locations
     match /routes/{routeId} {
       allow read: if isAuthenticated();

@@ -1,13 +1,14 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Aircraft, Flight, SystemSettings, AircraftType } from '../types';
-import { Plane, Plus, Edit2, Search, X, Save, AlertTriangle, Wrench, CheckCircle2, Activity, AlertOctagon, History, Timer, Lock, Loader2, Gauge, Filter, BookOpen, RotateCcw, ArrowRight, User, Clock, ClipboardList, FileText } from 'lucide-react';
+import { TechLogEntry } from '../types/techlog';
+import { Plane, Plus, Edit2, Search, X, Save, AlertTriangle, Wrench, CheckCircle2, Activity, AlertOctagon, History, Timer, Loader2, Gauge, Filter, Clock, FileText, CheckSquare, Settings, Tag } from 'lucide-react';
 import { FLEET_INVENTORY } from '../constants';
-import { FeatureGate } from './FeatureGate';
-import { fetchAircraftHistory, updateFlight } from '../services/firebase';
+import { subscribeToTechLogs, updateTechLog, commitTechLog } from '../services/firebase';
 import { CalendarWidget } from './CalendarWidget';
 import { calculateDuration } from '../utils/calculations';
-import { AirworthinessTracker } from './fleet/AirworthinessTracker'; // Imported New Component
+import { AirworthinessTracker } from './fleet/AirworthinessTracker'; 
+import { AircraftTypeManager } from './AircraftTypeManager';
 
 interface FleetManagerProps {
   fleet: (Aircraft & { _docId?: string })[];
@@ -18,17 +19,8 @@ interface FleetManagerProps {
   features: SystemSettings;
 }
 
-// Local state interface for editing log
-interface FlightEditState {
-    outTime: string;
-    offTime: string;
-    onTime: string;
-    inTime: string;
-    notes: string;
-}
-
 export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, aircraftTypes, onAdd, onUpdate, features }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'checks' | 'daily-logs'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'records' | 'types'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('All');
   
@@ -44,16 +36,12 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAircraft, setEditingAircraft] = useState<(Aircraft & { _docId?: string }) | null>(null);
   
-  // Legacy History State (kept for direct access if needed, but mainly replaced by Tracker)
-  const [historyData, setHistoryData] = useState<Flight[]>([]);
+  // Technical Records State
+  const [techLogs, setTechLogs] = useState<TechLogEntry[]>([]);
+  const [recordsDate, setRecordsDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [selectedRecordReg, setSelectedRecordReg] = useState<string | null>(null);
+  const [isVerifyingLog, setIsVerifyingLog] = useState<string | null>(null); // Store ID of log being verified
   
-  // Daily Logs Tab State
-  const [airworthinessDate, setAirworthinessDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [selectedAirworthinessReg, setSelectedAirworthinessReg] = useState<string>('');
-  const [logEdits, setLogEdits] = useState<Record<string, FlightEditState>>({});
-  const [isLogSaving, setIsLogSaving] = useState(false);
-  const [logSaveSuccess, setLogSaveSuccess] = useState(false);
-
   // Form State
   const [formData, setFormData] = useState<Partial<Aircraft>>({
     registration: '',
@@ -63,6 +51,12 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
     nextCheckHours: 0
   });
 
+  // Subscribe to Tech Logs
+  useEffect(() => {
+      const unsub = subscribeToTechLogs(setTechLogs);
+      return () => unsub();
+  }, []);
+
   const filteredFleet = fleet.filter(f => {
     const matchesSearch = f.registration.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           f.type.toLowerCase().includes(searchTerm.toLowerCase());
@@ -70,58 +64,49 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
     return matchesSearch && matchesType;
   });
 
-  // --- Daily Logs Logic ---
+  // --- Tech Log Handlers ---
   
-  // Filter fleet to only show aircraft active on the selected date
-  const activeLogFleet = useMemo(() => {
-      const activeRegs = new Set(
-          flights
-              .filter(f => f.date === airworthinessDate)
-              .map(f => f.aircraftRegistration)
-      );
-      
-      // If no flights, show full fleet to allow checking logs
-      if (activeRegs.size === 0) return fleet.sort((a, b) => a.registration.localeCompare(b.registration));
+  // Filter logs for the selected date
+  const dailyRecords = useMemo(() => {
+      return techLogs.filter(l => l.date === recordsDate);
+  }, [techLogs, recordsDate]);
 
-      return fleet
-        .filter(ac => activeRegs.has(ac.registration))
-        .sort((a, b) => a.registration.localeCompare(b.registration));
-  }, [fleet, flights, airworthinessDate]);
+  // Get unique aircraft that have logs on this date
+  const recordAircraftList = useMemo(() => {
+      const regs = new Set(dailyRecords.map(l => l.aircraftRegistration));
+      return Array.from(regs).sort();
+  }, [dailyRecords]);
 
-  // Filter flights for the selected aircraft and date
-  const aircraftLogFlights = useMemo(() => {
-      return flights
-        .filter(f => f.date === airworthinessDate && f.aircraftRegistration === selectedAirworthinessReg)
-        .sort((a, b) => (a.etd || '').localeCompare(b.etd || ''));
-  }, [flights, airworthinessDate, selectedAirworthinessReg]);
+  // Get logs for the selected aircraft on selected date
+  const activeRecordLogs = useMemo(() => {
+      if (!selectedRecordReg) return [];
+      return dailyRecords
+          .filter(l => l.aircraftRegistration === selectedRecordReg)
+          // Sort by Out time or Flight Number if time missing
+          .sort((a, b) => (a.times.out || '').localeCompare(b.times.out || '') || a.flightNumber.localeCompare(b.flightNumber));
+  }, [dailyRecords, selectedRecordReg]);
 
-  // Initialize log edits
-  useEffect(() => {
-      const newEdits: Record<string, FlightEditState> = {};
-      aircraftLogFlights.forEach(f => {
-          newEdits[f.id] = {
-              outTime: f.outTime || '',
-              offTime: f.offTime || '',
-              onTime: f.onTime || '',
-              inTime: f.inTime || '',
-              notes: f.notes || ''
-          };
-      });
-      setLogEdits(prev => ({ ...prev, ...newEdits }));
-  }, [aircraftLogFlights]);
-
-  const handleLogEdit = (flightId: string, field: keyof FlightEditState, value: string) => {
-      setLogEdits(prev => ({
-          ...prev,
-          [flightId]: {
-              ...prev[flightId],
-              [field]: value
-          }
-      }));
-      setLogSaveSuccess(false);
+  const handleVerifyLog = async (log: TechLogEntry) => {
+      if (!log) return;
+      setIsVerifyingLog(log.id);
+      try {
+          const aircraft = fleet.find(f => f.registration === log.aircraftRegistration);
+          if (!aircraft) throw new Error("Aircraft not found in fleet database.");
+          
+          await commitTechLog(log, aircraft);
+      } catch (e: any) {
+          console.error(e);
+          alert(`Verification Failed: ${e.message}`);
+      } finally {
+          setIsVerifyingLog(null);
+      }
   };
 
-  const handleLogTimeBlur = (flightId: string, field: keyof FlightEditState, value: string) => {
+  const handleUpdateLog = async (logId: string, updates: Partial<TechLogEntry>) => {
+      await updateTechLog(logId, updates);
+  };
+
+  const handleRecordTimeBlur = (logId: string, field: string, value: string, currentTimes: any) => {
       let formatted = value.trim();
       formatted = formatted.replace(/[^0-9:]/g, '');
       if (!formatted.includes(':') && formatted.length >= 3 && formatted.length <= 4) {
@@ -131,37 +116,20 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
       if (!formatted.includes(':') && formatted.length > 0 && formatted.length <= 2) {
           formatted = formatted.padStart(2, '0') + ':00';
       }
-      handleLogEdit(flightId, field, formatted);
-  };
-
-  const handleLogSave = async () => {
-      setIsLogSaving(true);
-      try {
-          const promises = aircraftLogFlights.map(f => {
-              const edit = logEdits[f.id];
-              if (!edit) return Promise.resolve();
-              const actualFlightTime = calculateDuration(edit.offTime, edit.onTime);
-              const actualBlockTime = calculateDuration(edit.outTime, edit.inTime);
-              return updateFlight(f.id, {
-                  outTime: edit.outTime,
-                  offTime: edit.offTime,
-                  onTime: edit.onTime,
-                  inTime: edit.inTime,
-                  notes: edit.notes,
-                  actualFlightTime: actualFlightTime > 0 ? actualFlightTime : undefined,
-                  actualBlockTime: actualBlockTime > 0 ? actualBlockTime : undefined,
-                  status: (edit.inTime && edit.onTime) ? 'Completed' : f.status
-              });
-          });
-          await Promise.all(promises);
-          setLogSaveSuccess(true);
-          setTimeout(() => setLogSaveSuccess(false), 3000);
-      } catch (error) {
-          console.error("Failed to save log", error);
-          alert("Failed to save changes.");
-      } finally {
-          setIsLogSaving(false);
+      
+      const newTimes = { ...currentTimes, [field]: formatted };
+      
+      // Auto-calculate durations if times are present
+      if (newTimes.off && newTimes.on) {
+          const flightTime = calculateDuration(newTimes.off, newTimes.on);
+          newTimes.flightTime = flightTime;
       }
+      if (newTimes.out && newTimes.in) {
+          const blockTime = calculateDuration(newTimes.out, newTimes.in);
+          newTimes.blockTime = blockTime;
+      }
+
+      handleUpdateLog(logId, { times: newTimes });
   };
 
   const getMinutesDiff = (start: string, end: string): number => {
@@ -267,18 +235,12 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
      return remaining < 50 && remaining > 0;
   }).length;
 
-  const recordedHours = historyData.reduce((acc, f) => acc + (f.flightTime || 0), 0);
-
   // Log Table Classes
-  const inputCellClass = "p-1 border-r border-slate-100 last:border-r-0";
   const logInputClass = "w-full text-center font-mono font-bold text-sm bg-transparent border border-transparent rounded focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all py-2 text-slate-700 placeholder:text-slate-300 hover:bg-slate-50";
-  const calcCellClass = "px-2 py-3 text-center font-mono font-bold text-sm border-r border-white/50";
-  const superHeaderClass = "px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center border-l border-slate-200 first:border-l-0 bg-slate-50/80";
-  const subHeaderClass = "px-2 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wide text-center border-t border-slate-200";
 
   // --- RENDER ---
 
-  // 1. If Viewing Detail
+  // 1. If Viewing Detail (Overview Tab's drilldown)
   if (viewingAircraft) {
       return (
           <div className="h-full">
@@ -321,7 +283,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
       </header>
 
       {/* Tabs */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-8 flex p-1">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mb-8 flex p-1 max-w-2xl">
         <button 
             onClick={() => setActiveTab('overview')}
             className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-all ${activeTab === 'overview' ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-100' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
@@ -330,12 +292,21 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
             Fleet Overview
         </button>
         <button 
-            onClick={() => setActiveTab('daily-logs')}
-            className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-all ${activeTab === 'daily-logs' ? 'bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-100' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+            onClick={() => setActiveTab('records')}
+            className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-all ${activeTab === 'records' ? 'bg-amber-50 text-amber-700 shadow-sm ring-1 ring-amber-100' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
         >
             <div className="flex items-center gap-2">
-                <ClipboardList size={18} />
-                Voyage Logs
+                <History size={18} />
+                Technical Records
+            </div>
+        </button>
+        <button 
+            onClick={() => setActiveTab('types')}
+            className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-bold text-sm transition-all ${activeTab === 'types' ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-100' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+        >
+            <div className="flex items-center gap-2">
+                <Tag size={18} />
+                Type Management
             </div>
         </button>
       </div>
@@ -517,7 +488,7 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
                                                     className="w-full mt-4 py-2 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-700 font-bold text-xs rounded-lg border border-slate-200 hover:border-blue-200 transition-colors flex items-center justify-center gap-2"
                                                     onClick={(e) => { e.stopPropagation(); handleSelectAircraft(ac); }}
                                                 >
-                                                    <FileText size={14} /> View Technical Records
+                                                    <Settings size={14} /> Aircraft Config
                                                 </button>
                                             </div>
 
@@ -538,310 +509,302 @@ export const FleetManager: React.FC<FleetManagerProps> = ({ fleet, flights, airc
                         </div>
                     );
                 })}
-                
-                {filteredFleet.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-dashed border-slate-300 text-slate-400">
-                        <Plane size={48} className="mb-4 opacity-20" />
-                        <p>No aircraft found matching your search.</p>
-                    </div>
-                )}
             </div>
         </div>
       )}
 
-      {/* DAILY LOGS TAB (Tech Log) */}
-      {activeTab === 'daily-logs' && (
-        <div className="flex h-[calc(100vh-200px)] bg-slate-50 relative overflow-hidden flex-col md:flex-row rounded-xl border border-slate-200 shadow-sm animate-in slide-in-from-bottom-2 duration-300">
-            {/* Sidebar Selection */}
-            <div className="w-full md:w-72 bg-white border-r border-slate-200 p-0 flex flex-col shadow-sm z-10 shrink-0">
-                <div className="p-5 border-b border-slate-100">
-                    <h2 className="font-bold text-lg text-slate-900 flex items-center gap-2 mb-1">
-                        <BookOpen className="text-blue-600" size={20} />
-                        Tech Log
-                    </h2>
-                    <p className="text-xs text-slate-500 mb-4">Daily Flight Records & Engineering Data</p>
-                    <CalendarWidget selectedDate={airworthinessDate} onDateSelect={(d) => { setAirworthinessDate(d); setSelectedAirworthinessReg(''); }} />
-                </div>
+      {/* TECH RECORDS TAB */}
+      {activeTab === 'records' && (
+          <div className="flex h-[calc(100vh-200px)] bg-slate-50 relative overflow-hidden flex-col md:flex-row rounded-xl border border-slate-200 shadow-sm animate-in slide-in-from-bottom-2 duration-300">
+              {/* Sidebar Selection */}
+              <div className="w-full md:w-72 bg-white border-r border-slate-200 p-0 flex flex-col shadow-sm z-10 shrink-0">
+                  <div className="p-5 border-b border-slate-100">
+                      <h2 className="font-bold text-lg text-slate-900 flex items-center gap-2 mb-1">
+                          <History className="text-amber-600" size={20} />
+                          Tech Records
+                      </h2>
+                      <p className="text-xs text-slate-500 mb-4">Verification & History Log</p>
+                      <CalendarWidget selectedDate={recordsDate} onDateSelect={(d) => { setRecordsDate(d); setSelectedRecordReg(null); }} />
+                  </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
-                    <div className="px-2 py-1 text-xs font-bold text-slate-400 uppercase tracking-wider">Select Aircraft</div>
-                    {activeLogFleet.length === 0 ? (
-                        <div className="p-4 text-center text-slate-400 text-xs italic bg-slate-50 rounded-lg border border-slate-100 mx-2">
-                            No aircraft found.
-                        </div>
-                    ) : (
-                        activeLogFleet.map(ac => {
-                            const isSelected = selectedAirworthinessReg === ac.registration;
-                            
-                            return (
-                                <button
-                                    key={ac.registration}
-                                    onClick={() => setSelectedAirworthinessReg(ac.registration)}
-                                    className={`
-                                        w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-all group
-                                        ${isSelected 
-                                            ? 'bg-slate-900 text-white shadow-md' 
-                                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                                        }
-                                    `}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-1.5 h-1.5 rounded-full bg-emerald-500`}></div>
-                                        <span className="font-bold text-sm font-mono tracking-tight">{ac.registration}</span>
-                                    </div>
-                                    <span className={`text-[10px] font-bold ${isSelected ? 'text-slate-400' : 'text-slate-300'}`}>{ac.type}</span>
-                                </button>
-                            );
-                        })
-                    )}
-                </div>
-            </div>
+                  <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+                      <div className="px-2 py-1 text-xs font-bold text-slate-400 uppercase tracking-wider">Flown Aircraft</div>
+                      {recordAircraftList.length === 0 ? (
+                          <div className="p-4 text-center text-slate-400 text-xs italic bg-slate-50 rounded-lg border border-slate-100 mx-2">
+                              No logs found for this date.
+                          </div>
+                      ) : (
+                          recordAircraftList.map(reg => {
+                              const isSelected = selectedRecordReg === reg;
+                              const aircraft = fleet.find(a => a.registration === reg);
+                              
+                              return (
+                                  <button
+                                      key={reg}
+                                      onClick={() => setSelectedRecordReg(reg)}
+                                      className={`
+                                          w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-all group
+                                          ${isSelected 
+                                              ? 'bg-slate-900 text-white shadow-md' 
+                                              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                          }
+                                      `}
+                                  >
+                                      <div className="flex items-center gap-3">
+                                          <div className={`w-1.5 h-1.5 rounded-full bg-amber-500`}></div>
+                                          <span className="font-bold text-sm font-mono tracking-tight">{reg}</span>
+                                      </div>
+                                      <span className={`text-[10px] font-bold ${isSelected ? 'text-slate-400' : 'text-slate-300'}`}>{aircraft?.type || 'UNK'}</span>
+                                  </button>
+                              );
+                          })
+                      )}
+                  </div>
+              </div>
 
-            {/* Main Content Area */}
-            <div className="flex-1 overflow-hidden flex flex-col bg-slate-50/50">
-                {selectedAirworthinessReg ? (
-                    <div className="flex flex-col h-full">
-                        {/* Action Header */}
-                        <div className="px-6 py-4 border-b border-slate-200 bg-white flex justify-between items-center shadow-sm z-20">
-                            <div className="flex items-center gap-6">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-lg bg-slate-900 flex items-center justify-center text-white shadow-lg shadow-slate-200">
-                                        <Plane size={20} />
-                                    </div>
-                                    <div>
-                                        <span className="block text-2xl font-black text-slate-900 leading-none tracking-tight">
-                                            {selectedAirworthinessReg}
-                                        </span>
-                                        <span className="text-xs font-medium text-slate-500">Log Sheet Entry</span>
-                                    </div>
-                                </div>
-                                <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
-                                <div className="hidden sm:block">
-                                    <span className="text-xs font-bold text-slate-400 uppercase">Date</span>
-                                    <div className="text-sm font-bold text-slate-700">{new Date(airworthinessDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
-                                </div>
-                            </div>
-                            
-                            <div className="flex gap-3 items-center">
-                                {logSaveSuccess && (
-                                    <span className="text-emerald-600 font-bold text-xs bg-emerald-50 px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-emerald-100 animate-in fade-in slide-in-from-right-2">
-                                        <CheckCircle2 size={14} /> Saved
-                                    </span>
-                                )}
-                                <button 
-                                    onClick={handleLogSave}
-                                    disabled={isLogSaving}
-                                    className="px-5 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 text-sm shadow-md transition-all active:scale-95 disabled:opacity-70"
-                                >
-                                    {isLogSaving ? <RotateCcw size={16} className="animate-spin" /> : <Save size={16} />}
-                                    Save Log
-                                </button>
-                            </div>
-                        </div>
+              {/* Main Content Area */}
+              <div className="flex-1 overflow-hidden flex flex-col bg-slate-50/50">
+                  {selectedRecordReg ? (
+                      <div className="flex flex-col h-full">
+                          {/* Header */}
+                          <div className="px-6 py-4 border-b border-slate-200 bg-white flex justify-between items-center shadow-sm z-20">
+                              <div className="flex items-center gap-6">
+                                  <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shadow-sm border border-amber-100">
+                                          <Plane size={20} />
+                                      </div>
+                                      <div>
+                                          <span className="block text-2xl font-black text-slate-900 leading-none tracking-tight">
+                                              {selectedRecordReg}
+                                          </span>
+                                          <span className="text-xs font-medium text-slate-500">Record Verification</span>
+                                      </div>
+                                  </div>
+                                  <div className="h-8 w-px bg-slate-200 hidden sm:block"></div>
+                                  <div className="hidden sm:block">
+                                      <span className="text-xs font-bold text-slate-400 uppercase">Date</span>
+                                      <div className="text-sm font-bold text-slate-700">{new Date(recordsDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+                                  </div>
+                              </div>
+                          </div>
 
-                        {/* Scrollable Content */}
-                        <div className="flex-1 overflow-auto p-6 custom-scrollbar space-y-8">
-                            
-                            {/* Flight Log Table */}
-                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden ring-1 ring-slate-900/5 min-w-[1000px]">
-                                <table className="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr className="bg-slate-50">
-                                            <th className={superHeaderClass} colSpan={1}>Identity</th>
-                                            <th className={superHeaderClass} colSpan={2}>Crew</th>
-                                            <th className={`${superHeaderClass} bg-blue-50/30 text-blue-600`} colSpan={4}>Block Times (Local)</th>
-                                            <th className={`${superHeaderClass} bg-emerald-50/30 text-emerald-600`} colSpan={2}>Duration (H:MM)</th>
-                                            <th className={superHeaderClass} colSpan={1}>Notes</th>
-                                        </tr>
-                                        <tr className="bg-white">
-                                            <th className={`${subHeaderClass} text-left pl-4`}>Flight / Route</th>
-                                            <th className={subHeaderClass}>PIC</th>
-                                            <th className={subHeaderClass}>SIC</th>
-                                            <th className={`${subHeaderClass} bg-blue-50/10 w-24`}>Out</th>
-                                            <th className={`${subHeaderClass} bg-blue-50/10 w-24`}>Off</th>
-                                            <th className={`${subHeaderClass} bg-blue-50/10 w-24`}>On</th>
-                                            <th className={`${subHeaderClass} bg-blue-50/10 w-24 border-r border-slate-200`}>In</th>
-                                            <th className={`${subHeaderClass} bg-emerald-50/20 text-emerald-700 w-24`}>Flight</th>
-                                            <th className={`${subHeaderClass} bg-blue-50/20 text-blue-700 w-24 border-r border-slate-200`}>Block</th>
-                                            <th className={`${subHeaderClass} text-left pl-3`}>Remarks</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {aircraftLogFlights.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={10} className="py-12 text-center text-slate-400">
-                                                    <div className="flex flex-col items-center">
-                                                        <Plane className="opacity-20 mb-2" size={32} />
-                                                        <p className="font-medium text-slate-600 text-sm">No flights scheduled for log.</p>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            aircraftLogFlights.map((flight) => {
-                                                const edit = logEdits[flight.id] || { outTime: '', offTime: '', onTime: '', inTime: '', notes: '' };
-                                                const flightMinutes = getMinutesDiff(edit.offTime, edit.onTime);
-                                                const blockMinutes = getMinutesDiff(edit.outTime, edit.inTime);
-                                                const routeParts = flight.route.split('-');
+                          {/* Table Container */}
+                          <div className="flex-1 overflow-auto p-6 custom-scrollbar space-y-8">
+                              
+                              {/* Flight Logs Table */}
+                              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden ring-1 ring-slate-900/5 min-w-[1200px]">
+                                  <table className="w-full text-left border-collapse">
+                                      <thead>
+                                          <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">
+                                              <th className="py-2 border-r border-slate-200 w-48" colSpan={1}>Identity</th>
+                                              <th className="py-2 border-r border-slate-200 w-32" colSpan={2}>Crew</th>
+                                              <th className="py-2 border-r border-slate-200 text-blue-600 bg-blue-50/30" colSpan={4}>Block Times (Local)</th>
+                                              <th className="py-2 border-r border-slate-200 text-emerald-600 bg-emerald-50/30" colSpan={2}>Duration (H:MM)</th>
+                                              <th className="py-2" colSpan={1}>Notes</th>
+                                          </tr>
+                                          <tr className="bg-white border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-wide text-center">
+                                              <th className="py-2 border-r border-slate-100 pl-4 text-left">Flight / Route</th>
+                                              <th className="py-2 border-r border-slate-100">PIC</th>
+                                              <th className="py-2 border-r border-slate-100">SIC</th>
+                                              <th className="py-2 border-r border-slate-100 bg-blue-50/10">Out</th>
+                                              <th className="py-2 border-r border-slate-100 bg-blue-50/10">Off</th>
+                                              <th className="py-2 border-r border-slate-100 bg-blue-50/10">On</th>
+                                              <th className="py-2 border-r border-slate-100 bg-blue-50/10">In</th>
+                                              <th className="py-2 border-r border-slate-100 bg-emerald-50/10">Flight</th>
+                                              <th className="py-2 border-r border-slate-100 bg-blue-50/20">Block</th>
+                                              <th className="py-2 pl-2 text-left">Remarks</th>
+                                          </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                          {activeRecordLogs.map(log => {
+                                              const isVerified = log.status === 'Verified';
+                                              const flight = flights.find(f => f.id === log.flightId);
+                                              const route = flight ? flight.route : '---';
+                                              
+                                              return (
+                                                  <tr key={log.id} className="hover:bg-slate-50 transition-colors group">
+                                                      <td className="px-4 py-3 border-r border-slate-100">
+                                                          <div className="font-bold text-slate-900 text-sm">{log.flightNumber}</div>
+                                                          <div className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded w-fit mt-1">{route}</div>
+                                                      </td>
+                                                      
+                                                      <td className="px-2 border-r border-slate-100 text-center">
+                                                          {flight?.pic ? <span className="font-bold text-xs bg-slate-50 px-2 py-1 rounded border border-slate-200">{flight.pic}</span> : '-'}
+                                                      </td>
+                                                      <td className="px-2 border-r border-slate-100 text-center">
+                                                          {flight?.sic ? <span className="font-medium text-xs text-slate-500">{flight.sic}</span> : '-'}
+                                                      </td>
 
-                                                return (
-                                                    <tr key={flight.id} className="hover:bg-slate-50 transition-colors group">
-                                                        <td className="px-4 py-3 border-r border-slate-100">
-                                                            <div className="flex flex-col">
-                                                                <span className="font-bold text-slate-800 text-sm">{flight.flightNumber}</span>
-                                                                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 mt-0.5">
-                                                                    <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{routeParts[0] || '---'}</span>
-                                                                    <ArrowRight size={10} className="opacity-50" />
-                                                                    <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{routeParts[1] || '---'}</span>
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-2 py-3 text-center border-r border-slate-100">
-                                                            <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 min-w-[60px] justify-center">
-                                                                <User size={10} className="opacity-50"/> {flight.pic}
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-2 py-3 text-center border-r border-slate-100">
-                                                            {flight.sic ? (
-                                                                <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-white border border-slate-100 text-xs font-medium text-slate-500 min-w-[60px] justify-center">
-                                                                    {flight.sic}
-                                                                </div>
-                                                            ) : <span className="text-slate-300">-</span>}
-                                                        </td>
-                                                        <td className={inputCellClass}>
-                                                            <input type="text" className={logInputClass} value={edit.outTime} onChange={e => handleLogEdit(flight.id, 'outTime', e.target.value)} onBlur={e => handleLogTimeBlur(flight.id, 'outTime', e.target.value)} placeholder="-" maxLength={5} />
-                                                        </td>
-                                                        <td className={inputCellClass}>
-                                                            <input type="text" className={logInputClass} value={edit.offTime} onChange={e => handleLogEdit(flight.id, 'offTime', e.target.value)} onBlur={e => handleLogTimeBlur(flight.id, 'offTime', e.target.value)} placeholder="-" maxLength={5} />
-                                                        </td>
-                                                        <td className={inputCellClass}>
-                                                            <input type="text" className={logInputClass} value={edit.onTime} onChange={e => handleLogEdit(flight.id, 'onTime', e.target.value)} onBlur={e => handleLogTimeBlur(flight.id, 'onTime', e.target.value)} placeholder="-" maxLength={5} />
-                                                        </td>
-                                                        <td className={`${inputCellClass} border-r border-slate-200`}>
-                                                            <input type="text" className={logInputClass} value={edit.inTime} onChange={e => handleLogEdit(flight.id, 'inTime', e.target.value)} onBlur={e => handleLogTimeBlur(flight.id, 'inTime', e.target.value)} placeholder="-" maxLength={5} />
-                                                        </td>
-                                                        <td className={`${calcCellClass} bg-emerald-50/40 text-emerald-700`}>
-                                                            {flightMinutes > 0 ? formatDuration(flightMinutes) : <span className="text-emerald-200">-</span>}
-                                                        </td>
-                                                        <td className={`${calcCellClass} bg-blue-50/40 text-blue-700 border-r border-slate-200`}>
-                                                            {blockMinutes > 0 ? formatDuration(blockMinutes) : <span className="text-blue-200">-</span>}
-                                                        </td>
-                                                        <td className="px-3 py-2">
-                                                            <input type="text" className="w-full text-xs font-medium border-0 border-b border-slate-200 bg-transparent focus:bg-white focus:border-blue-500 focus:ring-0 text-slate-600 placeholder:text-slate-300 px-1 py-1.5 transition-colors" placeholder="Remarks..." value={edit.notes} onChange={e => handleLogEdit(flight.id, 'notes', e.target.value)} />
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })
-                                        )}
-                                    </tbody>
-                                    {aircraftLogFlights.length > 0 && (
-                                        <tfoot className="bg-slate-50 border-t border-slate-200 shadow-inner">
-                                            <tr>
-                                                <td colSpan={7} className="px-6 py-3 text-right">
-                                                    <div className="flex items-center justify-end gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                                                        <Clock size={14} /> Total Daily Hours
-                                                    </div>
-                                                </td>
-                                                <td className="px-2 py-3 text-center">
-                                                    <div className="bg-emerald-100 text-emerald-800 font-black font-mono text-sm py-1 px-3 rounded-lg border border-emerald-200 shadow-sm inline-block min-w-[80px]">
-                                                        {formatDuration(aircraftLogFlights.reduce((acc, f) => {
-                                                            const edit = logEdits[f.id];
-                                                            return acc + (edit ? getMinutesDiff(edit.offTime, edit.onTime) : 0);
-                                                        }, 0))}
-                                                    </div>
-                                                </td>
-                                                <td className="px-2 py-3 text-center border-r border-slate-200">
-                                                    <div className="bg-blue-100 text-blue-800 font-black font-mono text-sm py-1 px-3 rounded-lg border border-blue-200 shadow-sm inline-block min-w-[80px]">
-                                                        {formatDuration(aircraftLogFlights.reduce((acc, f) => {
-                                                            const edit = logEdits[f.id];
-                                                            return acc + (edit ? getMinutesDiff(edit.outTime, edit.inTime) : 0);
-                                                        }, 0))}
-                                                    </div>
-                                                </td>
-                                                <td></td>
-                                            </tr>
-                                        </tfoot>
-                                    )}
-                                </table>
-                            </div>
+                                                      {/* Times Inputs */}
+                                                      <td className="p-1 border-r border-slate-100">
+                                                          <input 
+                                                              className={`w-full text-center text-sm font-mono font-bold py-1.5 rounded focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none ${isVerified ? 'bg-transparent text-slate-500' : 'bg-slate-50 text-slate-800'}`}
+                                                              value={log.times.out}
+                                                              disabled={isVerified}
+                                                              onChange={e => handleUpdateLog(log.id, { times: { ...log.times, out: e.target.value } })}
+                                                              onBlur={e => handleRecordTimeBlur(log.id, 'out', e.target.value, log.times)}
+                                                          />
+                                                      </td>
+                                                      <td className="p-1 border-r border-slate-100">
+                                                          <input 
+                                                              className={`w-full text-center text-sm font-mono font-bold py-1.5 rounded focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none ${isVerified ? 'bg-transparent text-slate-500' : 'bg-slate-50 text-slate-800'}`}
+                                                              value={log.times.off}
+                                                              disabled={isVerified}
+                                                              onChange={e => handleUpdateLog(log.id, { times: { ...log.times, off: e.target.value } })}
+                                                              onBlur={e => handleRecordTimeBlur(log.id, 'off', e.target.value, log.times)}
+                                                          />
+                                                      </td>
+                                                      <td className="p-1 border-r border-slate-100">
+                                                          <input 
+                                                              className={`w-full text-center text-sm font-mono font-bold py-1.5 rounded focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none ${isVerified ? 'bg-transparent text-slate-500' : 'bg-slate-50 text-slate-800'}`}
+                                                              value={log.times.on}
+                                                              disabled={isVerified}
+                                                              onChange={e => handleUpdateLog(log.id, { times: { ...log.times, on: e.target.value } })}
+                                                              onBlur={e => handleRecordTimeBlur(log.id, 'on', e.target.value, log.times)}
+                                                          />
+                                                      </td>
+                                                      <td className="p-1 border-r border-slate-100">
+                                                          <input 
+                                                              className={`w-full text-center text-sm font-mono font-bold py-1.5 rounded focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none ${isVerified ? 'bg-transparent text-slate-500' : 'bg-slate-50 text-slate-800'}`}
+                                                              value={log.times.in}
+                                                              disabled={isVerified}
+                                                              onChange={e => handleUpdateLog(log.id, { times: { ...log.times, in: e.target.value } })}
+                                                              onBlur={e => handleRecordTimeBlur(log.id, 'in', e.target.value, log.times)}
+                                                          />
+                                                      </td>
 
-                            {/* Engineering Data Table */}
-                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden ring-1 ring-slate-900/5 min-w-[1000px]">
-                                <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-center">
-                                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Engineering Data</h4>
-                                </div>
-                                <table className="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr className="bg-slate-100 text-xs font-bold text-slate-600 uppercase text-center border-b border-slate-200">
-                                            <th className="py-2 px-4 border-r border-slate-200 w-32">Time</th>
-                                            <th colSpan={2} className="py-2 px-4 border-r border-slate-200">ENG.TIME SINCE NEW/OVERHAUL</th>
-                                            <th colSpan={2} className="py-2 px-4 border-r border-slate-200">PROP.TIME SINCE NEW/OVERHAUL</th>
-                                            <th className="py-2 px-4">AC LANDINGS</th>
-                                        </tr>
-                                        <tr className="bg-white text-[10px] font-bold text-slate-500 uppercase text-center border-b border-slate-200">
-                                            <th className="py-1 border-r border-slate-200 bg-slate-50"></th>
-                                            <th className="py-1 px-2 border-r border-slate-200 w-1/5">Port s/n</th>
-                                            <th className="py-1 px-2 border-r border-slate-200 w-1/5">Stdb s/n</th>
-                                            <th className="py-1 px-2 border-r border-slate-200 w-1/5">Port s/n</th>
-                                            <th className="py-1 px-2 border-r border-slate-200 w-1/5">Stdb s/n</th>
-                                            <th className="py-1 px-2">Total</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="text-sm divide-y divide-slate-100">
-                                        {['Brought Foward', 'This Page', 'Carried Foward'].map((rowLabel) => (
-                                            <tr key={rowLabel} className="hover:bg-slate-50">
-                                                <td className="py-2 px-4 font-bold text-slate-700 border-r border-slate-200 bg-slate-50/50 whitespace-nowrap">{rowLabel}</td>
-                                                <td className="p-1 border-r border-slate-200"><input className={logInputClass} /></td>
-                                                <td className="p-1 border-r border-slate-200"><input className={logInputClass} /></td>
-                                                <td className="p-1 border-r border-slate-200"><input className={logInputClass} /></td>
-                                                <td className="p-1 border-r border-slate-200"><input className={logInputClass} /></td>
-                                                <td className="p-1"><input className={logInputClass} /></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                
-                                <div className="h-4 bg-slate-50 border-y border-slate-200"></div>
+                                                      <td className="px-2 py-3 border-r border-slate-100 text-center font-mono font-bold text-emerald-600 bg-emerald-50/10">
+                                                          {formatDuration(getMinutesDiff(log.times.off, log.times.on))}
+                                                      </td>
+                                                      <td className="px-2 py-3 border-r border-slate-100 text-center font-mono font-bold text-blue-600 bg-blue-50/10">
+                                                          {formatDuration(getMinutesDiff(log.times.out, log.times.in))}
+                                                      </td>
 
-                                <table className="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr className="bg-slate-100 text-xs font-bold text-slate-600 uppercase text-center border-b border-slate-200">
-                                            <th className="py-2 px-4 border-r border-slate-200 w-32 bg-slate-50"></th>
-                                            <th className="py-2 px-4 border-r border-slate-200 w-1/5">Airframe Hours</th>
-                                            <th className="py-2 px-4 border-r border-slate-200 w-1/5">Time To Next Inspection</th>
-                                            <th className="py-2 px-4 border-r border-slate-200 w-1/5">Type Of Next Inspection</th>
-                                            <th className="py-2 px-4 border-r border-slate-200 w-1/5">Next Major Inspection</th>
-                                            <th className="py-2 px-4">Hobbs</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="text-sm divide-y divide-slate-100">
-                                        {['Brought Foward', 'This Page', 'Carried Foward'].map((rowLabel) => (
-                                            <tr key={rowLabel} className="hover:bg-slate-50">
-                                                <td className="py-2 px-4 font-bold text-slate-700 border-r border-slate-200 bg-slate-50/50 whitespace-nowrap">{rowLabel}</td>
-                                                <td className="p-1 border-r border-slate-200"><input className={logInputClass} /></td>
-                                                <td className="p-1 border-r border-slate-200"><input className={logInputClass} /></td>
-                                                <td className="p-1 border-r border-slate-200"><input className={logInputClass} /></td>
-                                                <td className="p-1 border-r border-slate-200"><input className={logInputClass} /></td>
-                                                <td className="p-1"><input className={logInputClass} /></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                                                      <td className="p-2 align-top">
+                                                          <div className="flex justify-between items-start gap-2">
+                                                              <textarea 
+                                                                  className={`w-full h-8 text-xs bg-transparent border-none resize-none focus:ring-0 ${isVerified ? 'text-slate-400' : 'text-slate-600'}`}
+                                                                  placeholder="Remarks..."
+                                                                  value={(log.maintenance.defects || []).join('\n')}
+                                                                  disabled={isVerified}
+                                                                  onChange={e => handleUpdateLog(log.id, { maintenance: { ...log.maintenance, defects: e.target.value.split('\n') } })}
+                                                              />
+                                                              {!isVerified && (
+                                                                  <button 
+                                                                      onClick={() => handleVerifyLog(log)}
+                                                                      disabled={isVerifyingLog === log.id}
+                                                                      className="p-1.5 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 transition-colors"
+                                                                      title="Verify Log"
+                                                                  >
+                                                                      {isVerifyingLog === log.id ? <Loader2 size={14} className="animate-spin"/> : <CheckSquare size={14}/>}
+                                                                  </button>
+                                                              )}
+                                                          </div>
+                                                      </td>
+                                                  </tr>
+                                              );
+                                          })}
+                                      </tbody>
+                                      <tfoot className="bg-slate-50 border-t border-slate-200 shadow-inner">
+                                          <tr>
+                                              <td colSpan={7} className="px-6 py-3 text-right">
+                                                  <div className="flex items-center justify-end gap-2 text-xs font-bold text-slate-400 uppercase tracking-widest">
+                                                      <Clock size={14} /> Total Daily Hours
+                                                  </div>
+                                              </td>
+                                              <td className="px-2 py-3 text-center border-r border-slate-200">
+                                                  <div className="bg-emerald-100 text-emerald-800 font-black font-mono text-sm py-1 px-2 rounded border border-emerald-200">
+                                                      {formatDuration(activeRecordLogs.reduce((acc, l) => acc + getMinutesDiff(l.times.off, l.times.on), 0))}
+                                                  </div>
+                                              </td>
+                                              <td className="px-2 py-3 text-center border-r border-slate-200">
+                                                  <div className="bg-blue-100 text-blue-800 font-black font-mono text-sm py-1 px-2 rounded border border-blue-200">
+                                                      {formatDuration(activeRecordLogs.reduce((acc, l) => acc + getMinutesDiff(l.times.out, l.times.in), 0))}
+                                                  </div>
+                                              </td>
+                                              <td></td>
+                                          </tr>
+                                      </tfoot>
+                                  </table>
+                              </div>
 
-                        </div>
-                    </div>
-                ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                        <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-6 shadow-sm border border-slate-100 animate-in zoom-in duration-500">
-                            <Plane size={40} className="opacity-20 text-slate-600" />
-                        </div>
-                        <h3 className="text-xl font-bold text-slate-700">Select an Aircraft</h3>
-                        <p className="text-sm max-w-xs text-center mt-2 text-slate-500">
-                            Select an aircraft from the sidebar to access the technical log and engineering data.
-                        </p>
-                    </div>
-                )}
-            </div>
+                              {/* Component Engineering Data Table */}
+                              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden ring-1 ring-slate-900/5 min-w-[1000px] mt-8">
+                                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+                                      <Wrench size={16} className="text-slate-400"/>
+                                      <h4 className="text-xs font-bold text-slate-600 uppercase tracking-widest">Engineering Data - Component Hours</h4>
+                                  </div>
+                                  <table className="w-full text-left border-collapse">
+                                      <thead>
+                                          <tr className="bg-slate-100 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200">
+                                              <th className="py-2 px-4 w-1/3 border-r border-slate-200">Component</th>
+                                              <th className="py-2 px-4 w-1/6 text-right border-r border-slate-200">Serial No.</th>
+                                              <th className="py-2 px-4 w-1/6 text-right border-r border-slate-200">Brought Forward</th>
+                                              <th className="py-2 px-4 w-1/6 text-right border-r border-slate-200 text-emerald-600">Today</th>
+                                              <th className="py-2 px-4 w-1/6 text-right">Carried Forward</th>
+                                          </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100 text-sm">
+                                          {(() => {
+                                              const aircraft = fleet.find(a => a.registration === selectedRecordReg);
+                                              if (!aircraft) return <tr><td colSpan={5} className="p-4 text-center text-slate-400">Aircraft data unavailable</td></tr>;
+
+                                              const dailyTotalMinutes = activeRecordLogs.reduce((acc, l) => acc + getMinutesDiff(l.times.off, l.times.on), 0);
+                                              const dailyTotalHours = parseFloat((dailyTotalMinutes / 60).toFixed(2));
+
+                                              // Airframe Row
+                                              const afCurrent = aircraft.airframeTotalTime || aircraft.currentHours || 0;
+                                              
+                                              // Components Rows
+                                              const components = aircraft.components || [];
+
+                                              return (
+                                                  <>
+                                                      <tr className="bg-slate-50/50 font-bold text-slate-800">
+                                                          <td className="py-2 px-4 border-r border-slate-200">Airframe Total Time</td>
+                                                          <td className="py-2 px-4 text-right border-r border-slate-200 font-mono text-slate-500">N/A</td>
+                                                          <td className="py-2 px-4 text-right border-r border-slate-200 font-mono">{afCurrent.toFixed(2)}</td>
+                                                          <td className="py-2 px-4 text-right border-r border-slate-200 font-mono text-emerald-600">+{dailyTotalHours.toFixed(2)}</td>
+                                                          <td className="py-2 px-4 text-right font-mono bg-slate-50">{(afCurrent + dailyTotalHours).toFixed(2)}</td>
+                                                      </tr>
+                                                      {components.map(comp => (
+                                                          <tr key={comp.id} className="hover:bg-slate-50">
+                                                              <td className="py-2 px-4 border-r border-slate-200">
+                                                                  <div className="font-medium text-slate-700">{comp.name}</div>
+                                                                  <div className="text-[10px] text-slate-400 uppercase">{comp.type}</div>
+                                                              </td>
+                                                              <td className="py-2 px-4 text-right border-r border-slate-200 font-mono text-xs text-slate-500">{comp.serialNumber}</td>
+                                                              <td className="py-2 px-4 text-right border-r border-slate-200 font-mono text-slate-600">{(comp.currentHours || 0).toFixed(2)}</td>
+                                                              <td className="py-2 px-4 text-right border-r border-slate-200 font-mono text-emerald-600 font-bold">+{dailyTotalHours.toFixed(2)}</td>
+                                                              <td className="py-2 px-4 text-right font-mono font-bold text-slate-800 bg-slate-50/30">{((comp.currentHours || 0) + dailyTotalHours).toFixed(2)}</td>
+                                                          </tr>
+                                                      ))}
+                                                  </>
+                                              );
+                                          })()}
+                                      </tbody>
+                                  </table>
+                              </div>
+
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                          <History size={48} className="opacity-20 mb-4"/>
+                          <h3 className="text-xl font-bold text-slate-600">Select Aircraft</h3>
+                          <p className="text-sm max-w-xs text-center mt-2">
+                              Choose an aircraft from the list to view and verify technical logs for {new Date(recordsDate).toLocaleDateString()}.
+                          </p>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
+      {/* TYPE MANAGEMENT TAB */}
+      {activeTab === 'types' && (
+        <div className="animate-in slide-in-from-bottom-2 duration-300">
+            <AircraftTypeManager />
         </div>
       )}
 
